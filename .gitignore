@@ -1,0 +1,3 @@
+/target
+tests/fixtures/gen_driver.exe
+tests/fixtures/*.obj

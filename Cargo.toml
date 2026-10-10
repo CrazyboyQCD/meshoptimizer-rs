@@ -1,0 +1,31 @@
+[package]
+name = "meshoptimizer-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Safe, no_std-capable Rust port of meshoptimizer: mesh processing algorithms that make meshes ready for GPU consumption"
+license = "MIT OR Apache-2.0"
+categories = ["graphics", "encoding", "no-std"]
+keywords = ["mesh", "gltf", "graphics", "no_std", "compression"]
+
+[features]
+default = ["std"]
+# Uses the platform standard library for math; disable for no_std builds (libm backend).
+std = []
+
+[dependencies]
+libm = "0.2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
