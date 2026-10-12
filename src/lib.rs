@@ -26,6 +26,7 @@ mod rasterizer;
 mod simplifier;
 mod spatialorder;
 mod stripifier;
+mod tangentspace;
 mod vcacheoptimizer;
 mod vertexcodec;
 mod vertexfilter;
@@ -58,6 +59,9 @@ pub use simplifier::{
 };
 pub use spatialorder::{spatial_cluster_points, spatial_sort_remap, spatial_sort_triangles};
 pub use stripifier::{stripify, stripify_bound, unstripify, unstripify_bound};
+pub use tangentspace::{
+    TANGENT_COMPATIBLE, TANGENT_ZERO_FALLBACK, generate_normals, generate_tangents,
+};
 pub use vcacheoptimizer::{
     optimize_vertex_cache, optimize_vertex_cache_fifo, optimize_vertex_cache_strip,
 };

@@ -180,6 +180,7 @@ commit series driven test-first ([TDD](tdd.md) §3/§6):
 ## 10. Open items
 
 - `simplifier`'s exact module split is decided (see §4, landed in P1.6).
-- Whether `generateNormals`/`remesh` need a cargo feature (SRS FR-18 note) is decided at P1.7
-  based on their upstream stability at that time.
+- FR-18 cargo feature: decided at P1.7 — **no feature gate**; upstream expands
+  `MESHOPTIMIZER_EXPERIMENTAL` to the public API by default and the v1.3 pin froze the contract
+  (see SRS §3). `generateNormals`/`remesh` ship flat with experimental-status doc comments.
 - crates.io package name verification happens at publish time ([ADR-0008](adr/0008-licensing.md)).

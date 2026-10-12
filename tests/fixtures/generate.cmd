@@ -24,7 +24,7 @@ if errorlevel 1 (
 )
 
 cd /d "%FIX%"
-cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" "%UP%\src\meshletutils.cpp" "%UP%\src\meshletcodec.cpp" "%UP%\src\clusterizer.cpp" "%UP%\src\simplifier.cpp" /Fe:gen_driver.exe
+cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" "%UP%\src\meshletutils.cpp" "%UP%\src\meshletcodec.cpp" "%UP%\src\clusterizer.cpp" "%UP%\src\simplifier.cpp" "%UP%\src\tangentspace.cpp" /Fe:gen_driver.exe
 if errorlevel 1 exit /b 1
 
 if not exist "%FIX%..\data" mkdir "%FIX%..\data"
@@ -97,5 +97,7 @@ gen_driver.exe sp-sloppy "%FIX%..\data\sp_sloppy.bin" || exit /b 1
 gen_driver.exe sp-prune "%FIX%..\data\sp_prune.bin" || exit /b 1
 gen_driver.exe sp-points "%FIX%..\data\sp_points.bin" || exit /b 1
 gen_driver.exe sp-scale "%FIX%..\data\sp_scale.bin" || exit /b 1
+gen_driver.exe tan-tangents "%FIX%..\data\tan_tangents.bin" || exit /b 1
+gen_driver.exe tan-normals "%FIX%..\data\tan_normals.bin" || exit /b 1
 
 echo fixtures regenerated under tests\data\ from upstream at "%UP%"

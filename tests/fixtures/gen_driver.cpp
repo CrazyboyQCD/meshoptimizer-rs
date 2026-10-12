@@ -197,6 +197,19 @@
 //   sp-scale        repeat: hdr u32 V, u32 stride
 //                   in: positions V*stride bytes
 //                   out: f32 extent
+//
+// Tangent space commands (FR-16/FR-18). Streams use small LCG domains so exact
+// duplicates weld through the vertex hasher; grid meshes exercise per-corner
+// group merging. has_indices=0 means indices=NULL with index_count == V:
+//   tan-tangents    repeat: hdr u32 V, u32 index_count, u32 has_indices,
+//                           u32 pos_stride, u32 nrm_stride, u32 uv_stride, u32 options
+//                   in: positions V*pos_stride bytes, normals V*nrm_stride bytes,
+//                       uvs V*uv_stride bytes, [indices index_count u32]
+//                   out: tangents index_count*4 f32 (xyzw per corner)
+//   tan-normals     repeat: hdr u32 V, u32 index_count, u32 has_indices,
+//                           u32 pos_stride, f32 crease_angle, f32 smoothing
+//                   in: positions V*pos_stride bytes, [indices index_count u32]
+//                   out: normals index_count*3 f32 (xyz per corner)
 
 #include "meshoptimizer.h"
 
@@ -3721,6 +3734,173 @@ static void gen_sp_scale(FILE* f)
 	}
 }
 
+// Tangent space commands (FR-16/FR-18). Streams use small LCG domains so exact
+// duplicates weld through the vertex hasher; grid meshes exercise per-corner
+// group merging. Unindexed cases pass indices=NULL with index_count == V.
+static void tan_fill_stream(std::vector<unsigned char>& data, unsigned V, unsigned stride, unsigned count)
+{
+	data.assign(size_t(V) * stride, 0);
+	for (unsigned i = 0; i < V; ++i)
+		for (unsigned k = 0; k < count; ++k)
+		{
+			float a = float(lcg() % 16) / 8.f;
+			if (lcg() % 16 == 0)
+				a = -a;
+			memcpy(&data[size_t(i) * stride + k * 4], &a, 4);
+		}
+}
+
+static void gen_tan_tangents(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh, hole; // gw == 0: random mesh V/T
+		unsigned V, T;
+		unsigned pos_stride, nrm_stride, uv_stride, options, unindexed;
+	};
+	static const Cfg kCfgs[] = {
+	    {10, 10, 0, 0, 0, 12, 12, 8, 0, 0},
+	    {10, 10, 0, 0, 0, 12, 12, 8, meshopt_TangentCompatible, 0},
+	    {10, 10, 0, 0, 0, 12, 12, 8, meshopt_TangentZeroFallback, 0},
+	    {10, 10, 1, 0, 0, 12, 12, 8, 0, 0},
+	    {6, 6, 0, 0, 0, 16, 16, 12, 0, 0},
+	    {5, 5, 0, 0, 0, 24, 12, 16, meshopt_TangentZeroFallback | meshopt_TangentCompatible, 0},
+	    {0, 0, 0, 64, 98, 12, 12, 8, 0, 0},
+	    {0, 0, 0, 97, 150, 16, 16, 12, meshopt_TangentCompatible, 0},
+	    {9, 9, 0, 0, 0, 12, 12, 8, 0, 1},
+	    {0, 0, 0, 36, 0, 12, 12, 8, meshopt_TangentZeroFallback, 1},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		std::vector<unsigned char> normals, uvs;
+
+		if (c.unindexed)
+		{
+			make_positions(m, c.gw ? c.gw * c.gh : c.V, 0, c.pos_stride, false);
+			tan_fill_stream(normals, m.V, c.nrm_stride, 3);
+			tan_fill_stream(uvs, m.V, c.uv_stride, 2);
+		}
+		else if (c.gw)
+		{
+			make_grid_mesh(m, c.gw, c.gh, c.pos_stride, c.hole != 0);
+			tan_fill_stream(normals, m.V, c.nrm_stride, 3);
+			tan_fill_stream(uvs, m.V, c.uv_stride, 2);
+		}
+		else
+		{
+			make_position_mesh(m, c.V, c.T, c.pos_stride);
+			tan_fill_stream(normals, m.V, c.nrm_stride, 3);
+			tan_fill_stream(uvs, m.V, c.uv_stride, 2);
+		}
+
+		put_u32(f, m.V);
+		put_u32(f, m.index_count);
+		put_u32(f, m.has_indices ? 1 : 0);
+		put_u32(f, c.pos_stride);
+		put_u32(f, c.nrm_stride);
+		put_u32(f, c.uv_stride);
+		put_u32(f, c.options);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_bytes(f, normals.data(), normals.size());
+		put_bytes(f, uvs.data(), uvs.size());
+		if (m.has_indices)
+			put_indices(f, m);
+
+		std::vector<float> result(size_t(m.index_count) * 4);
+		meshopt_generateTangents(result.data(), m.has_indices ? m.indices.data() : NULL, m.index_count,
+		    reinterpret_cast<const float*>(m.vertices.data()), m.V, c.pos_stride,
+		    reinterpret_cast<const float*>(normals.data()), c.nrm_stride,
+		    reinterpret_cast<const float*>(uvs.data()), c.uv_stride, c.options);
+		put_bytes(f, result.data(), result.size() * sizeof(float));
+	}
+
+	// handcrafted: degenerate triangles (duplicate corners) next to a shared-edge pair
+	{
+		Mesh m;
+		m.V = 5;
+		m.has_indices = true;
+		m.vertices.assign(size_t(m.V) * 12, 0);
+		const float p[5][3] = {{0, 0, 0}, {1, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+		memcpy(m.vertices.data(), p, sizeof(p));
+		const unsigned idx[12] = {0, 1, 1, 1, 1, 0, 0, 3, 4, 2, 1, 0};
+		m.indices.assign(idx, idx + 12);
+		m.index_count = 12;
+
+		std::vector<unsigned char> normals, uvs;
+		tan_fill_stream(normals, m.V, 12, 3);
+		tan_fill_stream(uvs, m.V, 8, 2);
+
+		put_u32(f, m.V);
+		put_u32(f, m.index_count);
+		put_u32(f, 1);
+		put_u32(f, 12);
+		put_u32(f, 12);
+		put_u32(f, 8);
+		put_u32(f, 0);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_bytes(f, normals.data(), normals.size());
+		put_bytes(f, uvs.data(), uvs.size());
+		put_indices(f, m);
+
+		std::vector<float> result(size_t(m.index_count) * 4);
+		meshopt_generateTangents(result.data(), m.indices.data(), m.index_count,
+		    reinterpret_cast<const float*>(m.vertices.data()), m.V, 12,
+		    reinterpret_cast<const float*>(normals.data()), 12,
+		    reinterpret_cast<const float*>(uvs.data()), 8, 0);
+		put_bytes(f, result.data(), result.size() * sizeof(float));
+	}
+}
+
+static void gen_tan_normals(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh, hole; // gw == 0: random mesh V/T
+		unsigned V, T;
+		unsigned pos_stride, unindexed;
+		float crease_angle, smoothing;
+	};
+	static const Cfg kCfgs[] = {
+	    {10, 10, 0, 0, 0, 12, 0, 0.5f, 0.f},
+	    {10, 10, 0, 0, 0, 12, 0, 0.5f, 2.5f},
+	    {10, 10, 0, 0, 0, 16, 0, 3.1415927f, 0.f},
+	    {10, 10, 1, 0, 0, 12, 0, 0.f, 1.f},
+	    {5, 5, 0, 0, 0, 12, 0, 1.2f, 10.f},
+	    {0, 0, 0, 64, 98, 12, 0, 0.8f, 1.5f},
+	    {0, 0, 0, 97, 150, 24, 0, 0.5f, 0.f},
+	    {0, 0, 0, 36, 0, 12, 1, 0.5f, 0.5f},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+
+		if (c.unindexed)
+			make_positions(m, c.gw ? c.gw * c.gh : c.V, 0, c.pos_stride, false);
+		else if (c.gw)
+			make_grid_mesh(m, c.gw, c.gh, c.pos_stride, c.hole != 0);
+		else
+			make_position_mesh(m, c.V, c.T, c.pos_stride);
+
+		put_u32(f, m.V);
+		put_u32(f, m.index_count);
+		put_u32(f, m.has_indices ? 1 : 0);
+		put_u32(f, c.pos_stride);
+		put_f32(f, c.crease_angle);
+		put_f32(f, c.smoothing);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		if (m.has_indices)
+			put_indices(f, m);
+
+		std::vector<float> result(size_t(m.index_count) * 3);
+		meshopt_generateNormals(result.data(), m.has_indices ? m.indices.data() : NULL, m.index_count,
+		    reinterpret_cast<const float*>(m.vertices.data()), m.V, c.pos_stride, c.crease_angle, c.smoothing);
+		put_bytes(f, result.data(), result.size() * sizeof(float));
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc != 3)
@@ -3881,6 +4061,10 @@ int main(int argc, char** argv)
 		gen = gen_sp_points;
 	else if (strcmp(cmd, "sp-scale") == 0)
 		gen = gen_sp_scale;
+	else if (strcmp(cmd, "tan-tangents") == 0)
+		gen = gen_tan_tangents;
+	else if (strcmp(cmd, "tan-normals") == 0)
+		gen = gen_tan_normals;
 
 	if (!gen)
 	{

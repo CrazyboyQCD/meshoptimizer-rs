@@ -86,8 +86,10 @@ Additional requirements per group:
 - **FR-06** depends on internal meshlet helpers (`meshletutils.cpp`, 619 lines), ported as
   `pub(crate)`.
 - **FR-18** functions are gated upstream behind `MESHOPTIMIZER_EXPERIMENTAL`; they are in scope
-  for full coverage but may land last in the phase-1 sequence and may be feature-gated in the
-  Rust crate if their upstream contract shifts before re-pin.
+  for full coverage and are **not feature-gated** in the Rust crate (decided at P1.7): upstream
+  expands `MESHOPTIMIZER_EXPERIMENTAL` to `MESHOPTIMIZER_API` by default (meshoptimizer.h
+  L32-33), so the functions ship by default upstream, and the pin (ADR-0001) froze their
+  contract. Experimental status is documented in doc comments instead.
 - **Excluded from porting** (2 stable/1 experimental entry points + STL layer, documented in
   [ADR-0005](adr/0005-c-parity-api.md)): `setAllocator`, `setAllocatorCache`,
   `meshopt_IndexAdapter`/`meshopt_Buffer` template machinery.
