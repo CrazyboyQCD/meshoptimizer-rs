@@ -66,7 +66,9 @@ Rules:
 
 ## 5. Fixture workflow (before implementation)
 
-1. Build upstream at the pinned revision with its reference tooling (one-time per re-pin).
+1. Build upstream at the pinned revision with its reference tooling (one-time per re-pin);
+   the generator compiles with `MESHOPTIMIZER_NO_SIMD` — the scalar profile is the normative
+   reference ([ADR-0010](adr/0010-scalar-profile-fixtures.md)).
 2. Run the committed corpus — cube/sphere/grid/subdivided meshes, degenerate triangles, point
    clouds, boundary counts and strides — through upstream's encode/optimize entry points; for
    v0 *decode* fixtures, drive upstream's version setter on the tooling side.

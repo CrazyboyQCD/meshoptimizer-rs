@@ -13,6 +13,7 @@
 extern crate alloc;
 
 mod indexanalyzer;
+mod indexcodec;
 mod indexgenerator;
 mod math;
 mod overdrawoptimizer;
@@ -22,10 +23,16 @@ mod rasterizer;
 mod spatialorder;
 mod stripifier;
 mod vcacheoptimizer;
+mod vertexcodec;
+mod vertexfilter;
 mod vfetchoptimizer;
 
 pub use indexanalyzer::{
     VertexCacheStatistics, VertexFetchStatistics, analyze_vertex_cache, analyze_vertex_fetch,
+};
+pub use indexcodec::{
+    decode_index_buffer, decode_index_sequence, decode_index_version, encode_index_buffer,
+    encode_index_buffer_bound, encode_index_sequence, encode_index_sequence_bound,
 };
 pub use indexgenerator::*;
 pub use overdrawoptimizer::optimize_overdraw;
@@ -36,6 +43,14 @@ pub use spatialorder::{spatial_cluster_points, spatial_sort_remap, spatial_sort_
 pub use stripifier::{stripify, stripify_bound, unstripify, unstripify_bound};
 pub use vcacheoptimizer::{
     optimize_vertex_cache, optimize_vertex_cache_fifo, optimize_vertex_cache_strip,
+};
+pub use vertexcodec::{
+    decode_vertex_buffer, decode_vertex_version, encode_vertex_buffer, encode_vertex_buffer_bound,
+    encode_vertex_buffer_level,
+};
+pub use vertexfilter::{
+    EncodeExpMode, decode_filter_color, decode_filter_exp, decode_filter_oct, decode_filter_quat,
+    encode_filter_color, encode_filter_exp, encode_filter_oct, encode_filter_quat,
 };
 pub use vfetchoptimizer::{optimize_vertex_fetch, optimize_vertex_fetch_remap};
 

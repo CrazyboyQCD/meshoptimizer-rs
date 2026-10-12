@@ -60,6 +60,56 @@
 //                   in: indices index_count u32
 //                   out: destination index_count u32, reorder_offset u32,
 //                        reorder reorder_offset u32
+//
+// Index codec commands (FR-05; encoders emit v1, v0 decode cases drive the
+// upstream version setter generator-side):
+//   ic-enc-ib       repeat: hdr u32 index_count, u32 vertex_count
+//                   in: indices index_count u32
+//                   out: u32 encoded_size, encoded bytes
+//   ic-enc-seq      repeat: hdr u32 index_count, u32 vertex_count
+//                   in: indices index_count u32
+//                   out: u32 encoded_size, encoded bytes
+//   ic-dec-ib       repeat: hdr u32 index_count, u32 index_size (2|4),
+//                                u32 buffer_size, u32 expected_version
+//                   in: encoded bytes
+//                   out: i32 result, [decoded index_count*index_size bytes when result==0]
+//   ic-dec-seq      repeat: hdr u32 index_count, u32 index_size (2|4),
+//                                u32 buffer_size, u32 expected_version
+//                   in: encoded bytes
+//                   out: i32 result, [decoded index_count*index_size bytes when result==0]
+//   ic-hostile-ib   repeat: hdr u32 buffer_size, u32 index_count, u32 index_size
+//                   in: mutated encoded bytes
+//                   out: i32 result, [decoded index_count*index_size bytes when result==0]
+//   ic-hostile-seq  repeat: hdr u32 buffer_size, u32 index_count, u32 index_size
+//                   in: mutated encoded bytes
+//                   out: i32 result, [decoded index_count*index_size bytes when result==0]
+//
+// Vertex codec commands (FR-07; patterns: 0=random, 1=ramp, 2=constant, 3=sparse):
+//   vc-enc          repeat: hdr u32 vertex_count, u32 vertex_size, u32 level
+//                   in: vertices vertex_count*vertex_size bytes
+//                   out: u32 encoded_size, encoded bytes
+//   vc-dec          repeat: hdr u32 vertex_count, u32 vertex_size, u32 buffer_size,
+//                                u32 expected_version
+//                   in: encoded bytes
+//                   out: i32 result, [decoded vertex_count*vertex_size bytes when result==0]
+//   vc-hostile      repeat: hdr u32 buffer_size, u32 vertex_count, u32 vertex_size
+//                   in: mutated encoded bytes
+//                   out: i32 result, [decoded vertex_count*vertex_size bytes when result==0]
+//
+// Vertex filter commands (FR-08; scalar profile, ADR-0010):
+//   vf-dec-oct8     repeat: u32 count, in count*4 bytes, out count*4 bytes
+//   vf-dec-oct16    repeat: u32 count, in count*8 bytes, out count*8 bytes
+//   vf-dec-quat     repeat: u32 count, in count*8 bytes, out count*8 bytes
+//   vf-dec-exp      repeat: u32 word_count, in word_count*4 bytes, out word_count*4 bytes
+//   vf-dec-color8   repeat: u32 count, in count*4 bytes, out count*4 bytes
+//   vf-dec-color16  repeat: u32 count, in count*8 bytes, out count*8 bytes
+//   vf-enc-oct      repeat: u32 stride, u32 bits, u32 count,
+//                            in count*4 f32, out count*stride bytes
+//   vf-enc-quat     repeat: u32 bits, u32 count, in count*4 f32, out count*8 bytes
+//   vf-enc-exp      repeat: u32 stride_float, u32 bits, u32 mode, u32 count,
+//                            in count*stride_float f32, out count*stride_float u32
+//   vf-enc-color    repeat: u32 stride, u32 bits, u32 count,
+//                            in count*4 f32, out count*stride bytes
 
 #include "meshoptimizer.h"
 
@@ -1328,26 +1378,1127 @@ static void gen_pt(FILE* f)
 
 static void gen_od_debug(FILE* f)
 {
-	// diagnostic: dump hard/soft cluster boundaries for the first overdraw case
-	Mesh m;
-	make_position_mesh(m, 64, 100, 12);
-
-	unsigned cache_size = 16;
-	std::vector<unsigned> cache_timestamps(m.V);
-	std::vector<unsigned> hard(m.index_count / 3);
-	size_t hard_count = meshopt::generateHardBoundaries(hard.data(), m.indices.data(), m.index_count, m.V, cache_size, cache_timestamps.data());
-	std::vector<unsigned> soft(m.index_count / 3 + 1);
-	size_t soft_count = meshopt::generateSoftBoundaries(soft.data(), m.indices.data(), m.index_count, m.V, hard.data(), hard_count, cache_size, 1.0f, cache_timestamps.data());
-
-	put_u32(f, unsigned(hard_count));
-	for (size_t i = 0; i < hard_count; ++i)
-		put_u32(f, hard[i]);
-	put_u32(f, unsigned(soft_count));
-	for (size_t i = 0; i < soft_count; ++i)
-		put_u32(f, soft[i]);
+	// removed: called upstream-static internals not visible at the pin; never compiled
+	(void)f;
 }
 
 // --- dispatch ---------------------------------------------------------------
+
+// --- index codec (FR-05) ----------------------------------------------------
+
+static void ic_put_enc_ib(FILE* f, const std::vector<unsigned>& indices, unsigned vertex_count)
+{
+	put_u32(f, unsigned(indices.size()));
+	put_u32(f, vertex_count);
+	for (unsigned v : indices)
+		put_u32(f, v);
+
+	std::vector<unsigned char> buffer(meshopt_encodeIndexBufferBound(indices.size(), vertex_count));
+	size_t size = meshopt_encodeIndexBuffer(buffer.data(), buffer.size(), indices.data(), indices.size());
+	if (size == 0)
+	{
+		fprintf(stderr, "encodeIndexBuffer failed (n=%u)\n", unsigned(indices.size()));
+		exit(1);
+	}
+	put_u32(f, unsigned(size));
+	put_bytes(f, buffer.data(), size);
+}
+
+static void ic_put_enc_seq(FILE* f, const std::vector<unsigned>& indices, unsigned vertex_count)
+{
+	put_u32(f, unsigned(indices.size()));
+	put_u32(f, vertex_count);
+	for (unsigned v : indices)
+		put_u32(f, v);
+
+	std::vector<unsigned char> buffer(meshopt_encodeIndexSequenceBound(indices.size(), vertex_count));
+	size_t size = meshopt_encodeIndexSequence(buffer.data(), buffer.size(), indices.data(), indices.size());
+	if (size == 0)
+	{
+		fprintf(stderr, "encodeIndexSequence failed (n=%u)\n", unsigned(indices.size()));
+		exit(1);
+	}
+	put_u32(f, unsigned(size));
+	put_bytes(f, buffer.data(), size);
+}
+
+// triangle list [a, a+1, a+2], [a+3, a+4, a+5], ...
+static void ic_tri_range(std::vector<unsigned>& v, unsigned start, unsigned triangles)
+{
+	for (unsigned t = 0; t < triangles; ++t)
+		for (unsigned k = 0; k < 3; ++k)
+			v.push_back(start + t * 3 + k);
+}
+
+// strip-order triangles sharing edges: (0,1,2) (2,1,3) (2,3,4) (4,3,5) ...
+static void ic_tri_strip(std::vector<unsigned>& v, unsigned start, unsigned triangles)
+{
+	unsigned a = start, b = start + 1, c = start + 2;
+	for (unsigned t = 0; t < triangles; ++t)
+	{
+		v.push_back(a);
+		v.push_back(b);
+		v.push_back(c);
+		unsigned n = c + 1;
+		if (t % 2 == 0)
+		{
+			a = c;
+		}
+		else
+		{
+			b = c;
+		}
+		c = n;
+	}
+}
+
+// Encodes a corpus into a buffer and records a decode case (result + decoded bytes).
+static void ic_put_dec_case(FILE* f, const std::vector<unsigned>& indices, unsigned vertex_count, unsigned index_size, int version)
+{
+	meshopt_encodeIndexVersion(version);
+	std::vector<unsigned char> buffer(meshopt_encodeIndexBufferBound(indices.size(), vertex_count));
+	size_t size = meshopt_encodeIndexBuffer(buffer.data(), buffer.size(), indices.data(), indices.size());
+	meshopt_encodeIndexVersion(1);
+	if (size == 0)
+	{
+		fprintf(stderr, "encodeIndexBuffer failed (v%d, n=%u)\n", version, unsigned(indices.size()));
+		exit(1);
+	}
+
+	put_u32(f, unsigned(indices.size()));
+	put_u32(f, index_size);
+	put_u32(f, unsigned(size));
+	put_u32(f, unsigned(version));
+	put_bytes(f, buffer.data(), size);
+
+	std::vector<unsigned char> dest(size_t(indices.size()) * index_size);
+	int result = meshopt_decodeIndexBuffer(dest.data(), indices.size(), index_size, buffer.data(), size);
+	put_i32(f, result);
+	if (result == 0)
+		put_bytes(f, dest.data(), dest.size());
+}
+
+static void ic_put_dec_seq_case(FILE* f, const std::vector<unsigned>& indices, unsigned vertex_count, unsigned index_size, int version)
+{
+	meshopt_encodeIndexVersion(version);
+	std::vector<unsigned char> buffer(meshopt_encodeIndexSequenceBound(indices.size(), vertex_count));
+	size_t size = meshopt_encodeIndexSequence(buffer.data(), buffer.size(), indices.data(), indices.size());
+	meshopt_encodeIndexVersion(1);
+	if (size == 0)
+	{
+		fprintf(stderr, "encodeIndexSequence failed (v%d, n=%u)\n", version, unsigned(indices.size()));
+		exit(1);
+	}
+
+	put_u32(f, unsigned(indices.size()));
+	put_u32(f, index_size);
+	put_u32(f, unsigned(size));
+	put_u32(f, unsigned(version));
+	put_bytes(f, buffer.data(), size);
+
+	std::vector<unsigned char> dest(size_t(indices.size()) * index_size);
+	int result = meshopt_decodeIndexSequence(dest.data(), indices.size(), index_size, buffer.data(), size);
+	put_i32(f, result);
+	if (result == 0)
+		put_bytes(f, dest.data(), dest.size());
+}
+
+static void ic_put_hostile_case(FILE* f, const std::vector<unsigned char>& buffer, unsigned index_count, unsigned index_size, bool sequence)
+{
+	put_u32(f, unsigned(buffer.size()));
+	put_u32(f, index_count);
+	put_u32(f, index_size);
+	put_bytes(f, buffer.data(), buffer.size());
+
+	std::vector<unsigned char> dest(size_t(index_count) * index_size);
+	int result = sequence ? meshopt_decodeIndexSequence(dest.data(), index_count, index_size, buffer.data(), buffer.size())
+	                      : meshopt_decodeIndexBuffer(dest.data(), index_count, index_size, buffer.data(), buffer.size());
+	put_i32(f, result);
+	if (result == 0)
+		put_bytes(f, dest.data(), dest.size());
+}
+
+static void gen_ic_enc_ib(FILE* f)
+{
+	// empty
+	ic_put_enc_ib(f, std::vector<unsigned>(), 1);
+
+	// single triangle 0/1/2
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 1);
+		ic_put_enc_ib(f, v, 3);
+	}
+
+	// sequential non-overlapping triangles
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 100);
+		ic_put_enc_ib(f, v, 300);
+	}
+
+	// strip-like sequences (v1 last-1/last+1 codes)
+	{
+		std::vector<unsigned> v;
+		ic_tri_strip(v, 0, 64);
+		ic_put_enc_ib(f, v, 70);
+	}
+
+	// repeated triangle: exercises reset code (v1) and codeaux 00 entry
+	{
+		std::vector<unsigned> v;
+		for (unsigned t = 0; t < 40; ++t)
+		{
+			v.push_back(0);
+			v.push_back(1);
+			v.push_back(2);
+		}
+		ic_put_enc_ib(f, v, 3);
+	}
+
+	// repeated triangle with a gap so next > 0 when 0/1/2 reappears
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 10);
+		for (unsigned t = 0; t < 10; ++t)
+		{
+			v.push_back(0);
+			v.push_back(1);
+			v.push_back(2);
+		}
+		ic_put_enc_ib(f, v, 30);
+	}
+
+	// large indices: multi-byte varints
+	{
+		std::vector<unsigned> v;
+		unsigned base = 0xfffffff0u;
+		for (unsigned t = 0; t < 16; ++t)
+		{
+			v.push_back(base + t * 3);
+			v.push_back(base + t * 3 + 1);
+			v.push_back(base + t * 3 + 2);
+		}
+		ic_put_enc_ib(f, v, base + 48);
+	}
+
+	// random meshes, raw and vcache-optimized, with degenerate triangles
+	for (int variant = 0; variant < 2; ++variant)
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		if (variant == 1)
+		{
+			std::vector<unsigned> opt(m.index_count);
+			meshopt_optimizeVertexCache(opt.data(), m.indices.data(), m.index_count, m.V);
+			m.indices = opt;
+		}
+		ic_put_enc_ib(f, m.indices, m.V);
+	}
+
+	// all-degenerate triangles (same vertex three times)
+	{
+		std::vector<unsigned> v;
+		for (unsigned t = 0; t < 32; ++t)
+		{
+			unsigned k = t * 7 % 64;
+			v.push_back(k);
+			v.push_back(k);
+			v.push_back(k);
+		}
+		ic_put_enc_ib(f, v, 64);
+	}
+}
+
+static void gen_ic_enc_seq(FILE* f)
+{
+	// empty
+	ic_put_enc_seq(f, std::vector<unsigned>(), 1);
+
+	// single
+	{
+		std::vector<unsigned> v;
+		v.push_back(42);
+		ic_put_enc_seq(f, v, 43);
+	}
+
+	// monotonic small-delta sequence
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 256; ++i)
+			v.push_back(i);
+		ic_put_enc_seq(f, v, 256);
+	}
+
+	// alternating far-apart values: baseline switching heuristic
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 128; ++i)
+		{
+			v.push_back(i);
+			v.push_back(0xffff0000u + i);
+		}
+		ic_put_enc_seq(f, v, 0xffff0080u);
+	}
+
+	// random sequence
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 300; ++i)
+			v.push_back(lcg() % 1000);
+		ic_put_enc_seq(f, v, 1000);
+	}
+
+	// big values with big deltas; kept within a 2^30 window so encoded
+	// deltas stay below 2^31 (the varint loses the zigzag sign bit beyond
+	// that, so full-range random values do not round-trip upstream either)
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 64; ++i)
+			v.push_back(lcg() % 0x40000000u);
+		ic_put_enc_seq(f, v, 0x40000000u);
+	}
+}
+
+static void gen_ic_dec_ib(FILE* f)
+{
+	// corpora shared with the encode fixture; v0 and v1 decode, index_size 2 and 4
+	struct Corpus
+	{
+		std::vector<unsigned> indices;
+		unsigned vertex_count;
+	};
+	std::vector<Corpus> corpora;
+
+	{
+		Corpus c;
+		c.vertex_count = 1;
+		corpora.push_back(c);
+	}
+	{
+		Corpus c;
+		ic_tri_range(c.indices, 0, 1);
+		c.vertex_count = 3;
+		corpora.push_back(c);
+	}
+	{
+		Corpus c;
+		ic_tri_range(c.indices, 0, 64);
+		c.vertex_count = 192;
+		corpora.push_back(c);
+	}
+	{
+		Corpus c;
+		ic_tri_strip(c.indices, 0, 64);
+		c.vertex_count = 70;
+		corpora.push_back(c);
+	}
+	{
+		Corpus c;
+		for (unsigned t = 0; t < 10; ++t)
+			ic_tri_range(c.indices, 0, 10);
+		c.vertex_count = 30;
+		corpora.push_back(c);
+	}
+	{
+		Corpus c;
+		for (unsigned t = 0; t < 40; ++t)
+		{
+			c.indices.push_back(0);
+			c.indices.push_back(1);
+			c.indices.push_back(2);
+		}
+		c.vertex_count = 3;
+		corpora.push_back(c);
+	}
+	{
+		// wrapping multi-byte varint deltas
+		Corpus c;
+		unsigned base = 0xfffffff0u;
+		for (unsigned t = 0; t < 16; ++t)
+		{
+			c.indices.push_back(base + t * 3);
+			c.indices.push_back(base + t * 3 + 1);
+			c.indices.push_back(base + t * 3 + 2);
+		}
+		c.vertex_count = base + 48;
+		corpora.push_back(c);
+	}
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		std::vector<unsigned> opt(m.index_count);
+		meshopt_optimizeVertexCache(opt.data(), m.indices.data(), m.index_count, m.V);
+		Corpus c;
+		c.indices = opt;
+		c.vertex_count = m.V;
+		corpora.push_back(c);
+	}
+
+	for (const Corpus& v : corpora)
+	{
+		ic_put_dec_case(f, v.indices, v.vertex_count, 4, 1);
+		ic_put_dec_case(f, v.indices, v.vertex_count, 4, 0);
+		ic_put_dec_case(f, v.indices, v.vertex_count, 2, 1);
+	}
+}
+
+static void gen_ic_dec_seq(FILE* f)
+{
+	std::vector<std::vector<unsigned> > corpora;
+
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 256; ++i)
+			v.push_back(i);
+		corpora.push_back(v);
+	}
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 128; ++i)
+		{
+			v.push_back(i);
+			v.push_back(0xffff0000u + i);
+		}
+		corpora.push_back(v);
+	}
+	{
+		std::vector<unsigned> v;
+		for (unsigned i = 0; i < 300; ++i)
+			v.push_back(lcg() % 1000);
+		corpora.push_back(v);
+	}
+
+	for (const std::vector<unsigned>& v : corpora)
+	{
+		ic_put_dec_seq_case(f, v, 1000, 4, 1);
+		ic_put_dec_seq_case(f, v, 1000, 4, 0);
+		ic_put_dec_seq_case(f, v, 1000, 2, 1);
+	}
+}
+
+static void gen_ic_hostile_ib(FILE* f)
+{
+	struct Base
+	{
+		std::vector<unsigned char> enc;
+		unsigned index_count;
+		unsigned vertex_count;
+	};
+	Base bases[2];
+
+	{
+		std::vector<unsigned> v;
+		ic_tri_strip(v, 0, 8);
+		std::vector<unsigned char> buffer(meshopt_encodeIndexBufferBound(v.size(), 16));
+		size_t size = meshopt_encodeIndexBuffer(buffer.data(), buffer.size(), v.data(), v.size());
+		bases[0].enc.assign(buffer.begin(), buffer.begin() + size);
+		bases[0].index_count = unsigned(v.size());
+		bases[0].vertex_count = 16;
+	}
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		std::vector<unsigned> opt(m.index_count);
+		meshopt_optimizeVertexCache(opt.data(), m.indices.data(), m.index_count, m.V);
+		std::vector<unsigned char> buffer(meshopt_encodeIndexBufferBound(opt.size(), m.V));
+		size_t size = meshopt_encodeIndexBuffer(buffer.data(), buffer.size(), opt.data(), opt.size());
+		bases[1].enc.assign(buffer.begin(), buffer.begin() + size);
+		bases[1].index_count = unsigned(opt.size());
+		bases[1].vertex_count = m.V;
+	}
+
+	for (const Base& b : bases)
+	{
+		unsigned size = unsigned(b.enc.size());
+
+		// truncations at varied prefix lengths
+		unsigned lengths[] = {0, 1, 2, 17, 18, size / 2, size - 1, size};
+		for (unsigned L : lengths)
+		{
+			if (L > size)
+				continue;
+			std::vector<unsigned char> prefix(b.enc.begin(), b.enc.begin() + L);
+			ic_put_hostile_case(f, prefix, b.index_count, 4, false);
+		}
+
+		// header mutations: bad version nibbles, wrong magic, sequence header
+		unsigned char headers[] = {0xe2, 0xef, 0xf1, 0x01, 0xd1, 0x60};
+		for (unsigned char hb : headers)
+		{
+			std::vector<unsigned char> copy = b.enc;
+			copy[0] = hb;
+			ic_put_hostile_case(f, copy, b.index_count, 4, false);
+		}
+
+		// body flips: first code byte, code area, data area, codeaux table
+		unsigned offsets[] = {1, 1 + size / 6, size / 2, size - 16, size - 5};
+		for (unsigned off : offsets)
+		{
+			if (off >= size)
+				continue;
+			std::vector<unsigned char> copy = b.enc;
+			copy[off] ^= 0xff;
+			ic_put_hostile_case(f, copy, b.index_count, 4, false);
+			copy[off] ^= 0x01;
+			ic_put_hostile_case(f, copy, b.index_count, 4, false);
+		}
+
+		// valid stream decoded as u16 (indices < 65536)
+		ic_put_hostile_case(f, b.enc, b.index_count, 2, false);
+	}
+}
+
+static void gen_ic_hostile_seq(FILE* f)
+{
+	std::vector<unsigned> base_indices;
+	for (unsigned i = 0; i < 128; ++i)
+	{
+		base_indices.push_back(i);
+		base_indices.push_back(0xffff0000u + i);
+	}
+
+	std::vector<unsigned char> buffer(meshopt_encodeIndexSequenceBound(base_indices.size(), 0xffff0080u));
+	size_t size = meshopt_encodeIndexSequence(buffer.data(), buffer.size(), base_indices.data(), base_indices.size());
+	std::vector<unsigned char> enc(buffer.begin(), buffer.begin() + size);
+
+	unsigned lengths[] = {0, 1, 2, 4, 5, unsigned(enc.size()) / 2, unsigned(enc.size()) - 1, unsigned(enc.size())};
+	for (unsigned L : lengths)
+	{
+		if (L > enc.size())
+			continue;
+		std::vector<unsigned char> prefix(enc.begin(), enc.begin() + L);
+		ic_put_hostile_case(f, prefix, unsigned(base_indices.size()), 4, true);
+	}
+
+	unsigned char headers[] = {0xd2, 0xdf, 0xe1, 0x01, 0xc1};
+	for (unsigned char hb : headers)
+	{
+		std::vector<unsigned char> copy = enc;
+		copy[0] = hb;
+		ic_put_hostile_case(f, copy, unsigned(base_indices.size()), 4, true);
+	}
+
+	unsigned offsets[] = {1, unsigned(enc.size() / 2), unsigned(enc.size() - 5)};
+	for (unsigned off : offsets)
+	{
+		std::vector<unsigned char> copy = enc;
+		copy[off] ^= 0xff;
+		ic_put_hostile_case(f, copy, unsigned(base_indices.size()), 4, true);
+		copy[off] ^= 0x01;
+		ic_put_hostile_case(f, copy, unsigned(base_indices.size()), 4, true);
+	}
+}
+
+// --- vertex codec (FR-07) ---------------------------------------------------
+
+enum VertexPattern
+{
+	VP_RANDOM = 0,
+	VP_RAMP = 1,
+	VP_CONSTANT = 2,
+	VP_SPARSE = 3,
+};
+
+static void make_vertex_block(std::vector<unsigned char>& data, unsigned count, unsigned vertex_size, int pattern)
+{
+	data.assign(size_t(count) * vertex_size, 0);
+
+	for (unsigned i = 0; i < count; ++i)
+	{
+		for (unsigned k = 0; k < vertex_size; k += 4)
+		{
+			unsigned component;
+			switch (pattern)
+			{
+			case VP_RAMP:
+				component = (i * 3 + k * 5) & 0x3f;
+				break;
+			case VP_CONSTANT:
+				component = 0x5a;
+				break;
+			case VP_SPARSE:
+				component = (i % 7 == 0) ? lcg() : 0;
+				break;
+			default:
+				component = lcg();
+				break;
+			}
+			data[size_t(i) * vertex_size + k + 0] = unsigned char(component & 0xff);
+			data[size_t(i) * vertex_size + k + 1] = unsigned char((component >> 8) & 0xff);
+			data[size_t(i) * vertex_size + k + 2] = unsigned char((component >> 16) & 0xff);
+			data[size_t(i) * vertex_size + k + 3] = unsigned char((component >> 24) & 0xff);
+		}
+	}
+}
+
+static size_t vc_encode(std::vector<unsigned char>& buffer, const std::vector<unsigned char>& data, unsigned count, unsigned vertex_size, int level, int version)
+{
+	meshopt_encodeVertexVersion(version);
+	buffer.resize(meshopt_encodeVertexBufferBound(count, vertex_size));
+	size_t size = meshopt_encodeVertexBufferLevel(buffer.data(), buffer.size(), data.data(), count, vertex_size, level, -1);
+	meshopt_encodeVertexVersion(1);
+	if (size == 0)
+	{
+		fprintf(stderr, "encodeVertexBuffer failed (n=%u, s=%u, l=%d, v=%d)\n", count, vertex_size, level, version);
+		exit(1);
+	}
+	return size;
+}
+
+static void vc_put_enc(FILE* f, const std::vector<unsigned char>& data, unsigned count, unsigned vertex_size, int level, int version)
+{
+	put_u32(f, count);
+	put_u32(f, vertex_size);
+	put_u32(f, unsigned(level));
+	put_bytes(f, data.data(), size_t(count) * vertex_size);
+
+	std::vector<unsigned char> buffer;
+	size_t size = vc_encode(buffer, data, count, vertex_size, level, version);
+	put_u32(f, unsigned(size));
+	put_bytes(f, buffer.data(), size);
+}
+
+static void vc_put_dec(FILE* f, const std::vector<unsigned char>& data, unsigned count, unsigned vertex_size, int level, int version)
+{
+	std::vector<unsigned char> buffer;
+	size_t size = vc_encode(buffer, data, count, vertex_size, level, version);
+
+	put_u32(f, count);
+	put_u32(f, vertex_size);
+	put_u32(f, unsigned(size));
+	put_u32(f, unsigned(version));
+	put_bytes(f, buffer.data(), size);
+
+	std::vector<unsigned char> dest(size_t(count) * vertex_size);
+	int result = meshopt_decodeVertexBuffer(dest.data(), count, vertex_size, buffer.data(), size);
+	put_i32(f, result);
+	if (result == 0)
+		put_bytes(f, dest.data(), dest.size());
+}
+
+static void vc_put_hostile(FILE* f, const std::vector<unsigned char>& buffer, unsigned count, unsigned vertex_size)
+{
+	put_u32(f, unsigned(buffer.size()));
+	put_u32(f, count);
+	put_u32(f, vertex_size);
+	put_bytes(f, buffer.data(), buffer.size());
+
+	std::vector<unsigned char> dest(size_t(count) * vertex_size);
+	int result = meshopt_decodeVertexBuffer(dest.data(), count, vertex_size, buffer.data(), buffer.size());
+	put_i32(f, result);
+	if (result == 0)
+		put_bytes(f, dest.data(), dest.size());
+}
+
+static void gen_vc_enc(FILE* f)
+{
+	struct Cfg
+	{
+		int pattern;
+		unsigned count, vertex_size, level;
+	};
+	static const Cfg kCfgs[] = {
+	    {VP_RANDOM, 1000, 16, 2},  {VP_RANDOM, 257, 12, 2},   {VP_RANDOM, 16, 4, 2},
+	    {VP_RANDOM, 1, 8, 2},      {VP_RANDOM, 0, 12, 2},     {VP_RANDOM, 255, 20, 2},
+	    {VP_RAMP, 1000, 16, 2},    {VP_RAMP, 1000, 12, 0},    {VP_RAMP, 1000, 12, 1},
+	    {VP_RAMP, 1000, 12, 3},    {VP_CONSTANT, 1000, 16, 2}, {VP_CONSTANT, 16, 4, 1},
+	    {VP_SPARSE, 1000, 16, 2},  {VP_SPARSE, 255, 8, 3},    {VP_RANDOM, 70, 256, 2},
+	    {VP_RAMP, 64, 24, 3},      {VP_RANDOM, 64, 32, 3},    {VP_CONSTANT, 257, 64, 3},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		// reset per case so the same (pattern, count, size) corpus is identical
+		// across the enc/dec/hostile commands
+		lcg_reset();
+		std::vector<unsigned char> data;
+		make_vertex_block(data, c.count, c.vertex_size, c.pattern);
+		vc_put_enc(f, data, c.count, c.vertex_size, c.level, 1);
+	}
+}
+
+static void gen_vc_dec(FILE* f)
+{
+	struct Cfg
+	{
+		int pattern;
+		unsigned count, vertex_size, level;
+	};
+	static const Cfg kCfgs[] = {
+	    {VP_RANDOM, 1000, 16, 2},  {VP_RAMP, 1000, 12, 2},  {VP_CONSTANT, 1000, 16, 2},
+	    {VP_SPARSE, 1000, 16, 2},  {VP_RANDOM, 16, 4, 2},   {VP_RANDOM, 1, 8, 2},
+	    {VP_RANDOM, 0, 12, 2},     {VP_RAMP, 1000, 12, 0},  {VP_RAMP, 1000, 12, 3},
+	    {VP_SPARSE, 255, 8, 3},    {VP_RANDOM, 257, 20, 1}, {VP_RANDOM, 70, 256, 2},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		lcg_reset();
+		std::vector<unsigned char> data;
+		make_vertex_block(data, c.count, c.vertex_size, c.pattern);
+		vc_put_dec(f, data, c.count, c.vertex_size, c.level, 1);
+	}
+
+	// v0 decode cases (driven through the upstream version setter)
+	static const Cfg kV0[] = {
+	    {VP_RAMP, 1000, 12, 2},   {VP_RANDOM, 1000, 16, 2}, {VP_CONSTANT, 16, 4, 2},
+	    {VP_SPARSE, 255, 8, 2},   {VP_RANDOM, 1, 8, 2},     {VP_RANDOM, 0, 12, 2},
+	};
+	for (const Cfg& c : kV0)
+	{
+		lcg_reset();
+		std::vector<unsigned char> data;
+		make_vertex_block(data, c.count, c.vertex_size, c.pattern);
+		vc_put_dec(f, data, c.count, c.vertex_size, c.level, 0);
+	}
+}
+
+static void gen_vc_hostile(FILE* f)
+{
+	std::vector<unsigned char> data;
+	make_vertex_block(data, 100, 12, VP_RAMP);
+
+	std::vector<unsigned char> buffer;
+	size_t size = vc_encode(buffer, data, 100, 12, 2, 1);
+	unsigned full = unsigned(size);
+
+	// truncations
+	unsigned lengths[] = {0, 1, 2, 24, 25, full / 2, full - 1, full};
+	for (unsigned L : lengths)
+	{
+		if (L > full)
+			continue;
+		std::vector<unsigned char> prefix(buffer.begin(), buffer.begin() + L);
+		vc_put_hostile(f, prefix, 100, 12);
+	}
+
+	// header mutations
+	unsigned char headers[] = {0xa2, 0xaf, 0x90, 0x01, 0xe1};
+	for (unsigned char hb : headers)
+	{
+		std::vector<unsigned char> copy = buffer;
+		copy[0] = hb;
+		vc_put_hostile(f, copy, 100, 12);
+	}
+
+	// body flips: control byte, byte-group header, group data, literal area
+	unsigned offsets[] = {1, 2, full / 2, full - 40, full - 25};
+	for (unsigned off : offsets)
+	{
+		if (off >= full)
+			continue;
+		std::vector<unsigned char> copy = buffer;
+		copy[off] ^= 0xff;
+		vc_put_hostile(f, copy, 100, 12);
+		copy[off] ^= 0x01;
+		vc_put_hostile(f, copy, 100, 12);
+	}
+
+	// tail flips: first vertex bytes and channel bytes (vsize=12: tail is
+	// 9 bytes of padding + 12 bytes first_vertex + 3 channel bytes)
+	unsigned tail_offsets[] = {full - 12, full - 8, full - 5, full - 2};
+	for (unsigned off : tail_offsets)
+	{
+		if (off >= full)
+			continue;
+		std::vector<unsigned char> copy = buffer;
+		copy[off] ^= 0xff;
+		vc_put_hostile(f, copy, 100, 12);
+	}
+}
+
+// --- vertex filters (FR-08) -------------------------------------------------
+
+static void put_u16_into(std::vector<unsigned char>& v, size_t index, unsigned x, unsigned y, unsigned z, unsigned w)
+{
+	size_t off = index * 8;
+	v[off + 0] = unsigned char(x & 0xff);
+	v[off + 1] = unsigned char(x >> 8);
+	v[off + 2] = unsigned char(y & 0xff);
+	v[off + 3] = unsigned char(y >> 8);
+	v[off + 4] = unsigned char(z & 0xff);
+	v[off + 5] = unsigned char(z >> 8);
+	v[off + 6] = unsigned char(w & 0xff);
+	v[off + 7] = unsigned char(w >> 8);
+}
+
+static void put_filter_case(FILE* f, unsigned count, const std::vector<unsigned char>& in, const std::vector<unsigned char>& out)
+{
+	put_u32(f, count);
+	put_bytes(f, in.data(), in.size());
+	put_bytes(f, out.data(), out.size());
+}
+
+static void gen_vf_dec_oct8(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned count;
+		bool edges;
+	};
+	static const Cfg kCfgs[] = {{1, false}, {3, false}, {4, true}, {5, false}, {16, false}, {63, false}, {100, false}};
+
+	for (const Cfg& c : kCfgs)
+	{
+		std::vector<unsigned char> in(size_t(c.count) * 4);
+		if (c.edges)
+		{
+			// extreme x/y, z sentinel (255 encodes 1.f) and small z
+			const unsigned char e[4] = {0x80, 0x80, 0xff, 0};
+			const unsigned char e2[4] = {0x7f, 0x7f, 0xff, 0};
+			const unsigned char e3[4] = {0xff, 0x00, 0x00, 0};
+			const unsigned char e4[4] = {0x00, 0xff, 0x01, 0};
+			memcpy(&in[0 * 4], e, 4);
+			memcpy(&in[1 * 4], e2, 4);
+			memcpy(&in[2 * 4], e3, 4);
+			memcpy(&in[3 * 4], e4, 4);
+		}
+		else
+		{
+			for (unsigned i = 0; i < c.count; ++i)
+			{
+				in[size_t(i) * 4 + 0] = unsigned char(lcg() & 0xff);
+				in[size_t(i) * 4 + 1] = unsigned char(lcg() & 0xff);
+				in[size_t(i) * 4 + 2] = unsigned char((lcg() % 4 == 0) ? 255 : (lcg() & 0xff));
+				in[size_t(i) * 4 + 3] = unsigned char(lcg() & 0xff);
+			}
+		}
+
+		std::vector<unsigned char> out = in;
+		meshopt_decodeFilterOct(out.data(), c.count, 4);
+		put_filter_case(f, c.count, in, out);
+	}
+}
+
+static void gen_vf_dec_oct16(FILE* f)
+{
+	for (unsigned count : {1u, 3u, 4u, 5u, 16u, 63u})	{
+		std::vector<unsigned char> in(size_t(count) * 8);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			unsigned x = lcg() & 0xffff;
+			unsigned y = lcg() & 0xffff;
+			unsigned z = lcg() & 0x7fff;
+			unsigned w = lcg() & 0xffff;
+			if (i == 0)
+			{
+				x = 0x8000;
+				y = 0x7fff;
+				z = 0x7fff;
+			}
+			if (i == 1)
+			{
+				x = 0xffff;
+				y = 0x0001;
+				z = 0x0001;
+			}
+			put_u16_into(in, i, x, y, z, w);
+		}
+
+		std::vector<unsigned char> out = in;
+		meshopt_decodeFilterOct(out.data(), count, 8);
+		put_filter_case(f, count, in, out);
+	}
+}
+
+static void gen_vf_dec_quat(FILE* f)
+{
+	for (unsigned count : {1u, 3u, 4u, 7u, 16u, 64u})
+	{
+		std::vector<unsigned char> in(size_t(count) * 8);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			unsigned x = lcg() & 0xffff;
+			unsigned y = lcg() & 0xffff;
+			unsigned z = lcg() & 0xffff;
+			unsigned w = lcg() & 0xffff;
+			if (i == 0)
+			{
+				x = 0x8000;
+				y = 0x7fff;
+				z = 0x0001;
+				w = 0x0000; // sf = 3
+			}
+			if (i == 1)
+			{
+				x = 0x4000;
+				y = 0xc000;
+				z = 0x2000;
+				w = 0x00fc; // sf = 0xff, qc = 0
+			}
+			put_u16_into(in, i, x, y, z, w);
+		}
+
+		std::vector<unsigned char> out = in;
+		meshopt_decodeFilterQuat(out.data(), count, 8);
+		put_filter_case(f, count, in, out);
+	}
+}
+
+static void gen_vf_dec_exp(FILE* f)
+{
+	for (unsigned count : {1u, 3u, 4u, 16u, 64u})
+	{
+		std::vector<unsigned char> in(size_t(count) * 4);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			unsigned v = lcg();
+			if (i % 8 == 0)
+				v = (lcg() & 0xff) << 24; // zero mantissa
+			if (i % 8 == 1)
+				v = ((lcg() % 2 ? 0u : 255u) << 24) | (lcg() & 0xffffff); // extreme exponent
+			unsigned char* p = &in[size_t(i) * 4];
+			p[0] = unsigned char(v & 0xff);
+			p[1] = unsigned char((v >> 8) & 0xff);
+			p[2] = unsigned char((v >> 16) & 0xff);
+			p[3] = unsigned char((v >> 24) & 0xff);
+		}
+
+		std::vector<unsigned char> out = in;
+		meshopt_decodeFilterExp(out.data(), count, 4);
+		put_filter_case(f, count, in, out);
+	}
+}
+
+static void gen_vf_dec_color8(FILE* f)
+{
+	for (unsigned count : {1u, 3u, 4u, 5u, 16u, 64u})
+	{
+		std::vector<unsigned char> in(size_t(count) * 4);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			in[size_t(i) * 4 + 0] = unsigned char(lcg() & 0xff);       // y
+			in[size_t(i) * 4 + 1] = unsigned char(lcg() & 0xff);       // co (i8)
+			in[size_t(i) * 4 + 2] = unsigned char(lcg() & 0xff);       // cg (i8)
+			in[size_t(i) * 4 + 3] = unsigned char((lcg() % 4 == 0) ? (lcg() & 0xff) : ((lcg() & 0x7f) | 0x80)); // a
+		}
+
+		std::vector<unsigned char> out = in;
+		meshopt_decodeFilterColor(out.data(), count, 4);
+		put_filter_case(f, count, in, out);
+	}
+}
+
+static void gen_vf_dec_color16(FILE* f)
+{
+	for (unsigned count : {1u, 3u, 4u, 16u, 64u})
+	{
+		std::vector<unsigned char> in(size_t(count) * 8);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			unsigned y = lcg() & 0xffff;
+			unsigned co = lcg() & 0xffff;
+			unsigned cg = lcg() & 0xffff;
+			unsigned a = (lcg() % 4 == 0) ? (lcg() & 0xffff) : ((lcg() & 0x7fff) | 0x8000);
+			if (i == 0)
+			{
+				y = 0x8000;
+				co = 0x7fff;
+				cg = 0x8000;
+				a = 0xffff;
+			}
+			put_u16_into(in, i, y, co, cg, a);
+		}
+
+		std::vector<unsigned char> out = in;
+		meshopt_decodeFilterColor(out.data(), count, 8);
+		put_filter_case(f, count, in, out);
+	}
+}
+
+static void put_f32_vec(FILE* f, const std::vector<float>& v)
+{
+	for (float x : v)
+		put_f32(f, x);
+}
+
+static void gen_vf_enc_oct(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned stride, bits;
+	};
+	static const Cfg kCfgs[] = {{4, 2}, {4, 4}, {4, 8}, {8, 4}, {8, 8}, {8, 12}, {8, 16}};
+
+	for (const Cfg& c : kCfgs)
+	{
+		unsigned count = 64;
+		std::vector<float> data(size_t(count) * 4);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			float x = lcg_float(), y = lcg_float(), z = lcg_float();
+			float l = sqrtf(x * x + y * y + z * z);
+			if (l == 0.f)
+				l = 1.f;
+			data[size_t(i) * 4 + 0] = x / l;
+			data[size_t(i) * 4 + 1] = y / l;
+			data[size_t(i) * 4 + 2] = z / l;
+			data[size_t(i) * 4 + 3] = lcg_float() * 0.001f;
+		}
+		// edges: axes, zero vector, negative, w sentinel
+		const float e[4] = {1, 0, 0, 1};
+		const float e2[4] = {0, -1, 0, -1};
+		const float e3[4] = {0, 0, 0, 0};
+		const float e4[4] = {0.57735026f, 0.57735026f, 0.57735026f, 0.25f};
+		memcpy(&data[0], e, 16);
+		memcpy(&data[4], e2, 16);
+		memcpy(&data[8], e3, 16);
+		memcpy(&data[12], e4, 16);
+
+		put_u32(f, c.stride);
+		put_u32(f, c.bits);
+		put_u32(f, count);
+		put_f32_vec(f, data);
+
+		std::vector<unsigned char> dest(size_t(count) * c.stride);
+		meshopt_encodeFilterOct(dest.data(), count, c.stride, c.bits, data.data());
+		put_bytes(f, dest.data(), dest.size());
+	}
+}
+
+static void gen_vf_enc_quat(FILE* f)
+{
+	for (unsigned bits : {4u, 8u, 12u, 16u})
+	{
+		unsigned count = 64;
+		std::vector<float> data(size_t(count) * 4);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			float x = lcg_float(), y = lcg_float(), z = lcg_float(), w = lcg_float();
+			float l = sqrtf(x * x + y * y + z * z + w * w);
+			if (l == 0.f)
+				l = 1.f;
+			data[size_t(i) * 4 + 0] = x / l;
+			data[size_t(i) * 4 + 1] = y / l;
+			data[size_t(i) * 4 + 2] = z / l;
+			data[size_t(i) * 4 + 3] = w / l;
+			if (i % 8 == 0)
+				for (int k = 0; k < 4; ++k)
+					data[size_t(i) * 4 + k] = -data[size_t(i) * 4 + k]; // double-cover
+		}
+		// edges: identity, single components, zero quaternion
+		const float e[4] = {0, 0, 0, 1};
+		const float e2[4] = {1, 0, 0, 0};
+		const float e3[4] = {0, 0, 1, 0};
+		const float e4[4] = {0, 0, 0, 0};
+		memcpy(&data[0], e, 16);
+		memcpy(&data[4], e2, 16);
+		memcpy(&data[8], e3, 16);
+		memcpy(&data[12], e4, 16);
+
+		put_u32(f, bits);
+		put_u32(f, count);
+		put_f32_vec(f, data);
+
+		std::vector<unsigned char> dest(size_t(count) * 8);
+		meshopt_encodeFilterQuat(dest.data(), count, 8, bits, data.data());
+		put_bytes(f, dest.data(), dest.size());
+	}
+}
+
+static void gen_vf_enc_exp(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned stride_float, bits, mode;
+	};
+	static const Cfg kCfgs[] = {
+	    {1, 8, 0}, {1, 24, 0}, {3, 8, 0}, {4, 8, 0}, {4, 16, 0}, {4, 1, 0}, {4, 24, 0},
+	    {1, 8, 1}, {4, 8, 1}, {4, 24, 1},
+	    {1, 8, 2}, {4, 8, 2}, {4, 24, 2},
+	    {1, 8, 3}, {4, 8, 3}, {4, 24, 3},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		unsigned count = 64;
+		std::vector<float> data(size_t(count) * c.stride_float);
+		for (unsigned i = 0; i < count; ++i)
+			for (unsigned j = 0; j < c.stride_float; ++j)
+			{
+				float v;
+				switch ((i + j) % 8)
+				{
+				case 0:
+					v = 0.f;
+					break;
+				case 1:
+					v = -0.f;
+					break;
+				case 2:
+					v = 1e-30f;
+					break;
+				case 3:
+					v = 1e30f;
+					break;
+				case 4:
+					v = -lcg_float();
+					break;
+				case 5:
+					v = float(int(lcg() % 2001) - 1000) / 64.f;
+					break;
+				case 6:
+					v = 1.17549435e-38f; // smallest normal
+					break;
+				default:
+					v = lcg_float();
+					break;
+				}
+				data[size_t(i) * c.stride_float + j] = v;
+			}
+
+		put_u32(f, c.stride_float);
+		put_u32(f, c.bits);
+		put_u32(f, c.mode);
+		put_u32(f, count);
+		put_f32_vec(f, data);
+
+		std::vector<unsigned> dest(size_t(count) * c.stride_float);
+		meshopt_encodeFilterExp(dest.data(), count, c.stride_float * 4, c.bits, data.data(), meshopt_EncodeExpMode(c.mode));
+		put_bytes(f, dest.data(), dest.size() * 4);
+	}
+}
+
+static void gen_vf_enc_color(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned stride, bits;
+	};
+	static const Cfg kCfgs[] = {{4, 2}, {4, 4}, {4, 8}, {8, 8}, {8, 12}, {8, 16}};
+
+	for (const Cfg& c : kCfgs)
+	{
+		unsigned count = 64;
+		std::vector<float> data(size_t(count) * 4);
+		for (unsigned i = 0; i < count; ++i)
+		{
+			for (int k = 0; k < 4; ++k)
+				data[size_t(i) * 4 + k] = float(lcg() % 1001) / 1000.f;
+		}
+		// edges: black, white, primary/secondary colors, out-of-range (clamped)
+		const float e[4] = {0, 0, 0, 1};
+		const float e2[4] = {1, 1, 1, 0.5f};
+		const float e3[4] = {1, 0, 0, 1};
+		const float e4[4] = {0, 1, 1, 0};
+		const float e5[4] = {-1, 2, 0.5f, 0.25f};
+		memcpy(&data[0], e, 16);
+		memcpy(&data[4], e2, 16);
+		memcpy(&data[8], e3, 16);
+		memcpy(&data[12], e4, 16);
+		memcpy(&data[16], e5, 16);
+
+		put_u32(f, c.stride);
+		put_u32(f, c.bits);
+		put_u32(f, count);
+		put_f32_vec(f, data);
+
+		std::vector<unsigned char> dest(size_t(count) * c.stride);
+		meshopt_encodeFilterColor(dest.data(), count, c.stride, c.bits, data.data());
+		put_bytes(f, dest.data(), dest.size());
+	}
+}
 
 int main(int argc, char** argv)
 {
@@ -1437,6 +2588,44 @@ int main(int argc, char** argv)
 		gen = gen_pt;
 	else if (strcmp(cmd, "od-debug") == 0)
 		gen = gen_od_debug;
+	else if (strcmp(cmd, "ic-enc-ib") == 0)
+		gen = gen_ic_enc_ib;
+	else if (strcmp(cmd, "ic-enc-seq") == 0)
+		gen = gen_ic_enc_seq;
+	else if (strcmp(cmd, "ic-dec-ib") == 0)
+		gen = gen_ic_dec_ib;
+	else if (strcmp(cmd, "ic-dec-seq") == 0)
+		gen = gen_ic_dec_seq;
+	else if (strcmp(cmd, "ic-hostile-ib") == 0)
+		gen = gen_ic_hostile_ib;
+	else if (strcmp(cmd, "ic-hostile-seq") == 0)
+		gen = gen_ic_hostile_seq;
+	else if (strcmp(cmd, "vc-enc") == 0)
+		gen = gen_vc_enc;
+	else if (strcmp(cmd, "vc-dec") == 0)
+		gen = gen_vc_dec;
+	else if (strcmp(cmd, "vc-hostile") == 0)
+		gen = gen_vc_hostile;
+	else if (strcmp(cmd, "vf-dec-oct8") == 0)
+		gen = gen_vf_dec_oct8;
+	else if (strcmp(cmd, "vf-dec-oct16") == 0)
+		gen = gen_vf_dec_oct16;
+	else if (strcmp(cmd, "vf-dec-quat") == 0)
+		gen = gen_vf_dec_quat;
+	else if (strcmp(cmd, "vf-dec-exp") == 0)
+		gen = gen_vf_dec_exp;
+	else if (strcmp(cmd, "vf-dec-color8") == 0)
+		gen = gen_vf_dec_color8;
+	else if (strcmp(cmd, "vf-dec-color16") == 0)
+		gen = gen_vf_dec_color16;
+	else if (strcmp(cmd, "vf-enc-oct") == 0)
+		gen = gen_vf_enc_oct;
+	else if (strcmp(cmd, "vf-enc-quat") == 0)
+		gen = gen_vf_enc_quat;
+	else if (strcmp(cmd, "vf-enc-exp") == 0)
+		gen = gen_vf_enc_exp;
+	else if (strcmp(cmd, "vf-enc-color") == 0)
+		gen = gen_vf_enc_color;
 
 	if (!gen)
 	{

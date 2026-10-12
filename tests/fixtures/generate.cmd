@@ -6,6 +6,7 @@ rem Usage: generate.cmd <path-to-meshoptimizer-checkout>
 rem Requires MSVC Build Tools; override the vcvars path via MSVC_VCVARS.
 rem Fixture record formats are documented in gen_driver.cpp. Outputs are
 rem little-endian and deterministic (fixed edge lists + fixed-seed LCG).
+rem MESHOPTIMIZER_NO_SIMD pins the scalar reference profile (docs\adr\0010).
 setlocal
 if "%~1"=="" (
 	echo usage: %~nx0 ^<path-to-meshoptimizer-checkout^>
@@ -23,7 +24,7 @@ if errorlevel 1 (
 )
 
 cd /d "%FIX%"
-cl /nologo /O2 /W4 /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" /Fe:gen_driver.exe
+cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" /Fe:gen_driver.exe
 if errorlevel 1 exit /b 1
 
 if not exist "%FIX%..\data" mkdir "%FIX%..\data"
@@ -60,5 +61,24 @@ gen_driver.exe sp-remap "%FIX%..\data\spatial_remap.bin" || exit /b 1
 gen_driver.exe sp-tri "%FIX%..\data\spatial_tri.bin" || exit /b 1
 gen_driver.exe sp-cluster "%FIX%..\data\spatial_cluster.bin" || exit /b 1
 gen_driver.exe pt "%FIX%..\data\partition.bin" || exit /b 1
+gen_driver.exe ic-enc-ib "%FIX%..\data\ic_enc_ib.bin" || exit /b 1
+gen_driver.exe ic-enc-seq "%FIX%..\data\ic_enc_seq.bin" || exit /b 1
+gen_driver.exe ic-dec-ib "%FIX%..\data\ic_dec_ib.bin" || exit /b 1
+gen_driver.exe ic-dec-seq "%FIX%..\data\ic_dec_seq.bin" || exit /b 1
+gen_driver.exe ic-hostile-ib "%FIX%..\data\ic_hostile_ib.bin" || exit /b 1
+gen_driver.exe ic-hostile-seq "%FIX%..\data\ic_hostile_seq.bin" || exit /b 1
+gen_driver.exe vc-enc "%FIX%..\data\vc_enc.bin" || exit /b 1
+gen_driver.exe vc-dec "%FIX%..\data\vc_dec.bin" || exit /b 1
+gen_driver.exe vc-hostile "%FIX%..\data\vc_hostile.bin" || exit /b 1
+gen_driver.exe vf-dec-oct8 "%FIX%..\data\vf_dec_oct8.bin" || exit /b 1
+gen_driver.exe vf-dec-oct16 "%FIX%..\data\vf_dec_oct16.bin" || exit /b 1
+gen_driver.exe vf-dec-quat "%FIX%..\data\vf_dec_quat.bin" || exit /b 1
+gen_driver.exe vf-dec-exp "%FIX%..\data\vf_dec_exp.bin" || exit /b 1
+gen_driver.exe vf-dec-color8 "%FIX%..\data\vf_dec_color8.bin" || exit /b 1
+gen_driver.exe vf-dec-color16 "%FIX%..\data\vf_dec_color16.bin" || exit /b 1
+gen_driver.exe vf-enc-oct "%FIX%..\data\vf_enc_oct.bin" || exit /b 1
+gen_driver.exe vf-enc-quat "%FIX%..\data\vf_enc_quat.bin" || exit /b 1
+gen_driver.exe vf-enc-exp "%FIX%..\data\vf_enc_exp.bin" || exit /b 1
+gen_driver.exe vf-enc-color "%FIX%..\data\vf_enc_color.bin" || exit /b 1
 
 echo fixtures regenerated under tests\data\ from upstream at "%UP%"
