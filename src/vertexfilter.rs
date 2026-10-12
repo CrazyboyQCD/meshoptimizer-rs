@@ -21,19 +21,9 @@ pub enum EncodeExpMode {
     Clamped = 3,
 }
 
-// C float->int casts truncate toward zero and produce INT_MIN for NaN,
-// +-inf and out-of-range values on x86 (cvttss2si); Rust saturates instead,
-// so hostile filter inputs would diverge without this wrapper. 2^31 itself
-// is not representable as i32 and casts to INT_MIN on x86 as well.
-fn cast_i32(v: f32) -> i32 {
-    if v.is_nan() || v >= 2147483648.0 || v < -2147483648.0 {
-        i32::MIN
-    } else {
-        v as i32
-    }
-}
+use crate::quantization::{cast_i32, quantize_snorm};
 
-// upstream header inlines (meshoptimizer.h): meshopt_quantizeSnorm/Unorm
+// upstream header inlines (meshoptimizer.h): meshopt_quantizeUnorm
 fn quantize_unorm(v: f32, n: i32) -> i32 {
     let scale = ((1i32 << n) - 1) as f32;
 
@@ -41,17 +31,6 @@ fn quantize_unorm(v: f32, n: i32) -> i32 {
     let v = if v <= 1.0 { v } else { 1.0 };
 
     cast_i32(v * scale + 0.5)
-}
-
-fn quantize_snorm(v: f32, n: i32) -> i32 {
-    let scale = ((1i32 << (n - 1)) - 1) as f32;
-
-    let round = if v >= 0.0 { 0.5 } else { -0.5 };
-
-    let v = if v >= -1.0 { v } else { -1.0 };
-    let v = if v <= 1.0 { v } else { 1.0 };
-
-    cast_i32(v * scale + round)
 }
 
 fn decode_filter_oct_s8(data: &mut [u8], count: usize) {

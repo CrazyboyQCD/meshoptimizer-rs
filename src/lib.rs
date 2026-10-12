@@ -12,10 +12,13 @@
 
 extern crate alloc;
 
+mod clusterizer;
 mod indexanalyzer;
 mod indexcodec;
 mod indexgenerator;
 mod math;
+mod meshletcodec;
+mod meshletutils;
 mod overdrawoptimizer;
 mod partition;
 mod quantization;
@@ -27,6 +30,11 @@ mod vertexcodec;
 mod vertexfilter;
 mod vfetchoptimizer;
 
+pub use clusterizer::{
+    Bounds, Meshlet, build_meshlets, build_meshlets_bound, build_meshlets_flex,
+    build_meshlets_scan, build_meshlets_spatial, compute_cluster_bounds, compute_meshlet_bounds,
+    compute_sphere_bounds, extract_meshlet_indices, optimize_meshlet, optimize_meshlet_level,
+};
 pub use indexanalyzer::{
     VertexCacheStatistics, VertexFetchStatistics, analyze_vertex_cache, analyze_vertex_fetch,
 };
@@ -35,6 +43,7 @@ pub use indexcodec::{
     encode_index_buffer_bound, encode_index_sequence, encode_index_sequence_bound,
 };
 pub use indexgenerator::*;
+pub use meshletcodec::{decode_meshlet, decode_meshlet_raw, encode_meshlet, encode_meshlet_bound};
 pub use overdrawoptimizer::optimize_overdraw;
 pub use partition::partition_clusters;
 pub use quantization::{compute_position_exponent, dequantize_half, quantize_float, quantize_half};

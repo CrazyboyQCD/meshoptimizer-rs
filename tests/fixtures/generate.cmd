@@ -24,7 +24,7 @@ if errorlevel 1 (
 )
 
 cd /d "%FIX%"
-cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" /Fe:gen_driver.exe
+cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" "%UP%\src\meshletutils.cpp" "%UP%\src\meshletcodec.cpp" "%UP%\src\clusterizer.cpp" /Fe:gen_driver.exe
 if errorlevel 1 exit /b 1
 
 if not exist "%FIX%..\data" mkdir "%FIX%..\data"
@@ -80,5 +80,15 @@ gen_driver.exe vf-enc-oct "%FIX%..\data\vf_enc_oct.bin" || exit /b 1
 gen_driver.exe vf-enc-quat "%FIX%..\data\vf_enc_quat.bin" || exit /b 1
 gen_driver.exe vf-enc-exp "%FIX%..\data\vf_enc_exp.bin" || exit /b 1
 gen_driver.exe vf-enc-color "%FIX%..\data\vf_enc_color.bin" || exit /b 1
+gen_driver.exe cb-sphere "%FIX%..\data\clusterbounds_sphere.bin" || exit /b 1
+gen_driver.exe mc-enc "%FIX%..\data\mc_enc.bin" || exit /b 1
+gen_driver.exe mc-dec "%FIX%..\data\mc_dec.bin" || exit /b 1
+gen_driver.exe mc-dec-raw "%FIX%..\data\mc_dec_raw.bin" || exit /b 1
+gen_driver.exe mc-hostile "%FIX%..\data\mc_hostile.bin" || exit /b 1
+gen_driver.exe cb-cluster "%FIX%..\data\cb_cluster.bin" || exit /b 1
+gen_driver.exe cb-meshlet "%FIX%..\data\cb_meshlet.bin" || exit /b 1
+gen_driver.exe ms-optimize "%FIX%..\data\ms_optimize.bin" || exit /b 1
+gen_driver.exe ms-extract "%FIX%..\data\ms_extract.bin" || exit /b 1
+gen_driver.exe ms-build "%FIX%..\data\ms_build.bin" || exit /b 1
 
 echo fixtures regenerated under tests\data\ from upstream at "%UP%"

@@ -67,7 +67,9 @@ Upstream's largest units exceed the project's ~1000-line source-file budget. Pla
 - `simplifier.rs` → `simplifier/` directory: `adjacency.rs` (edge/vertex adjacency),
   `quadric.rs` (attribute quadrics, collapse candidates), `simplify.rs` (public entry points),
   `sloppy.rs`, `prune.rs`.
-- `clusterizer.rs` → `clusterizer/` with `meshlets.rs` (build/optimize) and `bounds.rs`
+- `clusterizer.rs` → `clusterizer/` with `meshlets.rs` (build + flex machinery),
+  `kdtree.rs` (kd-tree internals), `spatial.rs` (spatial builder + BVH),
+  `optimize.rs` (optimize/extract helpers from `meshletutils.cpp`) and `bounds.rs`
   (cluster/meshlet/sphere bounds).
 - `vertexcodec.rs` → `vertexcodec/` with `encode.rs`, `decode.rs`, shared `bitstream.rs`.
 

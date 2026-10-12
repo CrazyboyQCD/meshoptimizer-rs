@@ -110,6 +110,57 @@
 //                            in count*stride_float f32, out count*stride_float u32
 //   vf-enc-color    repeat: u32 stride, u32 bits, u32 count,
 //                            in count*4 f32, out count*stride bytes
+//
+// Meshlet/bounds commands (P1.5; bounding-sphere kernel via computeSphereBounds):
+//   cb-sphere       repeat: hdr u32 count, u32 stride, u32 has_radii, u32 radii_stride
+//                   in: positions count*stride bytes (f32 x,y,z), [radii count*radii_stride bytes]
+//                   out: f32 center[3], f32 radius
+//
+// Meshlet codec commands (FR-06; scalar profile):
+//   mc-enc          repeat: hdr u32 vertex_count, u32 triangle_count
+//                   in: vertices vertex_count u32, triangles triangle_count*3 u8
+//                   out: u32 encoded_size, encoded bytes
+//   mc-dec          repeat: hdr u32 vertex_count, u32 vertex_size, u32 triangle_count,
+//                                u32 triangle_size, u32 buffer_size
+//                   in: encoded bytes
+//                   out: i32 result, [vertices vertex_count*vertex_size bytes,
+//                        triangles triangle_count*triangle_size bytes when result==0]
+//   mc-dec-raw      repeat: hdr u32 vertex_count, u32 triangle_count, u32 buffer_size
+//                   in: encoded bytes
+//                   out: i32 result, [vertices align4(vertex_count)*4 u32,
+//                        triangles align2(triangle_count)*4 u32 when result==0]
+//                   (raw decoding writes the rounded-up element counts)
+//   mc-hostile      repeat: hdr u32 buffer_size, u32 vertex_count, u32 triangle_count,
+//                                u32 raw
+//                   in: mutated encoded bytes
+//                   out: i32 result, [vertices vertex_count*(raw?4:4) bytes,
+//                        triangles triangle_count*(raw?4:3) bytes when result==0]
+//
+// Clusterizer commands (FR-12; bounds serialized as f32 center[3], f32 radius,
+// f32 cone_apex[3], f32 cone_axis[3], f32 cone_cutoff, i8 cone_axis_s8[k] and
+// i8 cone_cutoff_s8 each widened to u32 little-endian):
+//   cb-cluster      repeat: hdr u32 index_count, u32 vertex_count, u32 stride
+//                   in: positions vertex_count*stride bytes, indices index_count u32
+//                   out: bounds
+//   cb-meshlet      repeat: hdr u32 vertex_count, u32 triangle_count,
+//                                u32 vertex_total, u32 stride
+//                   in: meshlet_vertices vertex_total u32 (first vertex_count used),
+//                       meshlet_triangles triangle_count*3 u8,
+//                       positions vertex_total*stride bytes
+//                   out: bounds
+//   ms-optimize     repeat: hdr u32 vertex_count, u32 triangle_count, u32 level
+//                   in: vertices vertex_count u32, triangles triangle_count*3 u8
+//                   out: vertices vertex_count u32, triangles triangle_count*3 u8
+//   ms-extract      repeat: hdr u32 index_count, u32 unique
+//                   in: indices index_count u32
+//                   out: vertices unique u32, triangles index_count u8
+//   ms-build        repeat: hdr u32 index_count, u32 vertex_count, u32 stride,
+//                                u32 variant, u32 max_vertices, u32 min_triangles,
+//                                u32 max_triangles, u32 weight_bits, f32 weight
+//                   in: positions vertex_count*stride bytes, indices index_count u32
+//                   out: u32 meshlet_count, per meshlet: u32 vertex_offset,
+//                        u32 triangle_offset, u32 vertex_count, u32 triangle_count,
+//                        vertices index_count u32, triangles index_count u8
 
 #include "meshoptimizer.h"
 
@@ -2500,6 +2551,686 @@ static void gen_vf_enc_color(FILE* f)
 	}
 }
 
+// --- meshlets & bounds (P1.5) ------------------------------------------------
+
+static void gen_cb_sphere(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, stride, radii_stride;
+		bool radii;
+	};
+	static const Cfg kCfgs[] = {
+	    {1, 12, 0, false},
+	    {64, 12, 0, false},
+	    {257, 16, 0, false},
+	    {64, 12, 4, true},
+	    {257, 16, 8, true},
+	    {1000, 12, 0, false},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_positions(m, c.V, 0, c.stride, false);
+
+		std::vector<float> radii;
+		if (c.radii)
+		{
+			radii.assign(size_t(c.V) * (c.radii_stride / 4), 0.f);
+			for (unsigned i = 0; i < c.V; ++i)
+				radii[size_t(i) * (c.radii_stride / 4)] = float(lcg() % 64) / 8.f - 1.f;
+		}
+
+		put_u32(f, c.V);
+		put_u32(f, c.stride);
+		put_u32(f, c.radii ? 1u : 0u);
+		put_u32(f, c.radii_stride);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		for (float r : radii)
+			put_f32(f, r);
+
+		meshopt_Bounds bounds = meshopt_computeSphereBounds(reinterpret_cast<const float*>(m.vertices.data()), c.V, c.stride, c.radii ? radii.data() : NULL, c.radii ? c.radii_stride : 0);
+		for (int k = 0; k < 3; ++k)
+			put_f32(f, bounds.center[k]);
+		put_f32(f, bounds.radius);
+	}
+
+	// all-identical points: zero-diameter sphere (paxisd == 0 path)
+	{
+		const unsigned V = 8, stride = 12;
+		std::vector<unsigned char> points(size_t(V) * stride, 0);
+		const float p[3] = {1.5f, -2.25f, 3.75f};
+		for (unsigned i = 0; i < V; ++i)
+			memcpy(&points[size_t(i) * stride], p, 12);
+
+		put_u32(f, V);
+		put_u32(f, stride);
+		put_u32(f, 0);
+		put_u32(f, 0);
+		put_bytes(f, points.data(), points.size());
+
+		meshopt_Bounds bounds = meshopt_computeSphereBounds(reinterpret_cast<const float*>(points.data()), V, stride, NULL, 0);
+		for (int k = 0; k < 3; ++k)
+			put_f32(f, bounds.center[k]);
+		put_f32(f, bounds.radius);
+	}
+}
+
+// --- meshlet codec (FR-06) ---------------------------------------------------
+
+struct MeshletCorpus
+{
+	std::vector<unsigned> vertices;
+	std::vector<unsigned char> triangles;
+};
+
+static MeshletCorpus mc_make_meshlet(const std::vector<unsigned>& indices)
+{
+	MeshletCorpus m;
+	m.vertices.resize(256);
+	m.triangles.resize(indices.size());
+	size_t unique = meshopt_extractMeshletIndices(m.vertices.data(), m.triangles.data(), indices.data(), indices.size());
+	m.vertices.resize(unique);
+	return m;
+}
+
+static size_t mc_encode(std::vector<unsigned char>& buffer, const std::vector<unsigned>& vertices, const std::vector<unsigned char>& triangles)
+{
+	buffer.resize(meshopt_encodeMeshletBound(256, 512));
+	size_t size = meshopt_encodeMeshlet(buffer.data(), buffer.size(), vertices.data(), vertices.size(), triangles.data(), triangles.size() / 3);
+	if (size == 0)
+	{
+		fprintf(stderr, "encodeMeshlet failed (v=%u, t=%u)\n", unsigned(vertices.size()), unsigned(triangles.size() / 3));
+		exit(1);
+	}
+	return size;
+}
+
+static void mc_put_enc(FILE* f, const std::vector<unsigned>& vertices, const std::vector<unsigned char>& triangles)
+{
+	put_u32(f, unsigned(vertices.size()));
+	put_u32(f, unsigned(triangles.size() / 3));
+	for (unsigned v : vertices)
+		put_u32(f, v);
+	put_bytes(f, triangles.data(), triangles.size());
+
+	std::vector<unsigned char> buffer;
+	size_t size = mc_encode(buffer, vertices, triangles);
+	put_u32(f, unsigned(size));
+	put_bytes(f, buffer.data(), size);
+}
+
+static void mc_put_enc_indices(FILE* f, const std::vector<unsigned>& indices)
+{
+	MeshletCorpus m = mc_make_meshlet(indices);
+	mc_put_enc(f, m.vertices, m.triangles);
+}
+
+static void mc_put_dec(FILE* f, const std::vector<unsigned>& vertices, const std::vector<unsigned char>& triangles, unsigned vertex_size, unsigned triangle_size)
+{
+	std::vector<unsigned char> buffer;
+	size_t size = mc_encode(buffer, vertices, triangles);
+
+	put_u32(f, unsigned(vertices.size()));
+	put_u32(f, vertex_size);
+	put_u32(f, unsigned(triangles.size() / 3));
+	put_u32(f, triangle_size);
+	put_u32(f, unsigned(size));
+	put_bytes(f, buffer.data(), size);
+
+	std::vector<unsigned char> vdest(size_t(vertices.size()) * vertex_size);
+	std::vector<unsigned char> tdest(size_t(triangles.size() / 3) * triangle_size);
+	int result = meshopt_decodeMeshlet(vdest.data(), vertices.size(), vertex_size, tdest.data(), triangles.size() / 3, triangle_size, buffer.data(), size);
+	put_i32(f, result);
+	if (result == 0)
+	{
+		put_bytes(f, vdest.data(), vdest.size());
+		put_bytes(f, tdest.data(), tdest.size());
+	}
+}
+
+static void mc_put_dec_raw(FILE* f, const std::vector<unsigned>& vertices, const std::vector<unsigned char>& triangles)
+{
+	std::vector<unsigned char> buffer;
+	size_t size = mc_encode(buffer, vertices, triangles);
+
+	put_u32(f, unsigned(vertices.size()));
+	put_u32(f, unsigned(triangles.size() / 3));
+	put_u32(f, unsigned(size));
+	put_bytes(f, buffer.data(), size);
+
+	std::vector<unsigned> vdest((vertices.size() + 3) & ~3u);
+	std::vector<unsigned> tdest((triangles.size() / 3 + 1) & ~1u);
+	int result = meshopt_decodeMeshletRaw(vdest.data(), vertices.size(), tdest.data(), triangles.size() / 3, buffer.data(), size);
+	put_i32(f, result);
+	if (result == 0)
+	{
+		for (unsigned v : vdest)
+			put_u32(f, v);
+		for (unsigned t : tdest)
+			put_u32(f, t);
+	}
+}
+
+static void mc_put_hostile(FILE* f, const std::vector<unsigned char>& buffer, unsigned vertex_count, unsigned triangle_count, bool raw)
+{
+	put_u32(f, unsigned(buffer.size()));
+	put_u32(f, vertex_count);
+	put_u32(f, triangle_count);
+	put_u32(f, raw ? 1u : 0u);
+	put_bytes(f, buffer.data(), buffer.size());
+
+	unsigned vertex_size = raw ? 4 : 4;
+	unsigned triangle_size = raw ? 4 : 3;
+
+	std::vector<unsigned char> vdest(size_t(vertex_count) * vertex_size);
+	std::vector<unsigned char> tdest(size_t(triangle_count) * triangle_size);
+	int result = raw ? meshopt_decodeMeshletRaw(reinterpret_cast<unsigned*>(vdest.data()), vertex_count, reinterpret_cast<unsigned*>(tdest.data()), triangle_count, buffer.data(), buffer.size())
+	                 : meshopt_decodeMeshlet(vdest.data(), vertex_count, vertex_size, tdest.data(), triangle_count, triangle_size, buffer.data(), buffer.size());
+	put_i32(f, result);
+	if (result == 0)
+	{
+		put_bytes(f, vdest.data(), vdest.size());
+		put_bytes(f, tdest.data(), tdest.size());
+	}
+}
+
+static void mc_hostile_rounds(FILE* f, const std::vector<unsigned>& vertices, const std::vector<unsigned char>& triangles)
+{
+	std::vector<unsigned char> buffer;
+	size_t size = mc_encode(buffer, vertices, triangles);
+	unsigned full = unsigned(size);
+	unsigned vertex_count = unsigned(vertices.size());
+	unsigned triangle_count = unsigned(triangles.size() / 3);
+
+	// truncations
+	unsigned lengths[] = {0, 1, 2, full / 2, full - 1, full};
+	for (unsigned L : lengths)
+	{
+		std::vector<unsigned char> prefix(buffer.begin(), buffer.begin() + L);
+		mc_put_hostile(f, prefix, vertex_count, triangle_count, false);
+	}
+
+	// blind flips across data/extra area, gap area, ctrl area and codes area
+	size_t codes_size = (triangle_count + 1) / 2;
+	size_t ctrl_size = (vertex_count + 3) / 4;
+	unsigned offsets[] = {1, full / 4, full - unsigned(codes_size), full - unsigned(codes_size + ctrl_size), full - unsigned(codes_size + ctrl_size) / 2};
+	for (unsigned off : offsets)
+	{
+		if (off >= full)
+			continue;
+		std::vector<unsigned char> copy = buffer;
+		copy[off] ^= 0xff;
+		mc_put_hostile(f, copy, vertex_count, triangle_count, false);
+		copy[off] ^= 0x01;
+		mc_put_hostile(f, copy, vertex_count, triangle_count, false);
+	}
+
+	// raw decoding of the same mutated streams
+	{
+		std::vector<unsigned char> copy = buffer;
+		copy[full / 3] ^= 0xff;
+		mc_put_hostile(f, copy, vertex_count, triangle_count, true);
+	}
+
+	// valid stream decoded with a mismatched triangle count
+	mc_put_hostile(f, buffer, vertex_count, triangle_count < 256 ? triangle_count + 1 : triangle_count - 1, false);
+}
+
+static void gen_mc_enc(FILE* f)
+{
+	// single triangle
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 1);
+		mc_put_enc_indices(f, v);
+	}
+
+	// strip-like connectivity (heavy edge reuse)
+	{
+		std::vector<unsigned> v;
+		ic_tri_strip(v, 0, 100);
+		mc_put_enc_indices(f, v);
+	}
+
+	// sequential triangles filling a 255-vertex meshlet
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 85);
+		mc_put_enc_indices(f, v);
+	}
+
+	// repeated triangle
+	{
+		std::vector<unsigned> v;
+		for (unsigned t = 0; t < 40; ++t)
+		{
+			v.push_back(0);
+			v.push_back(1);
+			v.push_back(2);
+		}
+		mc_put_enc_indices(f, v);
+	}
+
+	// random mesh, raw and vcache-optimized
+	for (int variant = 0; variant < 2; ++variant)
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		std::vector<unsigned> indices = m.indices;
+		if (variant == 1)
+		{
+			std::vector<unsigned> opt(indices.size());
+			meshopt_optimizeVertexCache(opt.data(), indices.data(), indices.size(), m.V);
+			indices = opt;
+		}
+		mc_put_enc_indices(f, indices);
+	}
+
+	// meshlet-optimized variants (levels 1 and 3)
+	for (int level = 1; level <= 3; level += 2)
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		MeshletCorpus c = mc_make_meshlet(m.indices);
+		meshopt_optimizeMeshletLevel(c.vertices.data(), c.vertices.size(), c.triangles.data(), c.triangles.size() / 3, level);
+		mc_put_enc(f, c.vertices, c.triangles);
+	}
+
+	// vertex-free encoding: triangle data only (decodable with vertex_count == 0)
+	{
+		std::vector<unsigned> vertices;
+		std::vector<unsigned char> triangles;
+		for (unsigned t = 0; t < 40; ++t)
+		{
+			triangles.push_back(0);
+			triangles.push_back(1);
+			triangles.push_back(2);
+		}
+		mc_put_enc(f, vertices, triangles);
+	}
+}
+
+static std::vector<MeshletCorpus> mc_dec_corpora()
+{
+	std::vector<MeshletCorpus> corpora;
+
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 1);
+		corpora.push_back(mc_make_meshlet(v));
+	}
+	{
+		std::vector<unsigned> v;
+		ic_tri_strip(v, 0, 100);
+		corpora.push_back(mc_make_meshlet(v));
+	}
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 85);
+		corpora.push_back(mc_make_meshlet(v));
+	}
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		std::vector<unsigned> opt(m.index_count);
+		meshopt_optimizeVertexCache(opt.data(), m.indices.data(), m.index_count, m.V);
+		MeshletCorpus c = mc_make_meshlet(opt);
+		meshopt_optimizeMeshletLevel(c.vertices.data(), c.vertices.size(), c.triangles.data(), c.triangles.size() / 3, 3);
+		corpora.push_back(c);
+	}
+	{
+		// vertex-free meshlet
+		MeshletCorpus c;
+		for (unsigned t = 0; t < 40; ++t)
+		{
+			c.triangles.push_back(0);
+			c.triangles.push_back(1);
+			c.triangles.push_back(2);
+		}
+		corpora.push_back(c);
+	}
+
+	return corpora;
+}
+
+static void gen_mc_dec(FILE* f)
+{
+	for (const MeshletCorpus& c : mc_dec_corpora())
+	{
+		mc_put_dec(f, c.vertices, c.triangles, 4, 3);
+		mc_put_dec(f, c.vertices, c.triangles, 2, 3);
+		mc_put_dec(f, c.vertices, c.triangles, 4, 4);
+		mc_put_dec(f, c.vertices, c.triangles, 2, 4);
+	}
+}
+
+static void gen_mc_dec_raw(FILE* f)
+{
+	for (const MeshletCorpus& c : mc_dec_corpora())
+		mc_put_dec_raw(f, c.vertices, c.triangles);
+}
+
+static void gen_mc_hostile(FILE* f)
+{
+	{
+		std::vector<unsigned> v;
+		ic_tri_strip(v, 0, 32);
+		MeshletCorpus c = mc_make_meshlet(v);
+		mc_hostile_rounds(f, c.vertices, c.triangles);
+	}
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		std::vector<unsigned> opt(m.index_count);
+		meshopt_optimizeVertexCache(opt.data(), m.indices.data(), m.index_count, m.V);
+		MeshletCorpus c = mc_make_meshlet(opt);
+		meshopt_optimizeMeshletLevel(c.vertices.data(), c.vertices.size(), c.triangles.data(), c.triangles.size() / 3, 1);
+		mc_hostile_rounds(f, c.vertices, c.triangles);
+	}
+}
+
+// --- clusterizer (FR-12) -----------------------------------------------------
+
+static void put_bounds(FILE* f, const meshopt_Bounds& bounds)
+{
+	for (int k = 0; k < 3; ++k)
+		put_f32(f, bounds.center[k]);
+	put_f32(f, bounds.radius);
+	for (int k = 0; k < 3; ++k)
+		put_f32(f, bounds.cone_apex[k]);
+	for (int k = 0; k < 3; ++k)
+		put_f32(f, bounds.cone_axis[k]);
+	put_f32(f, bounds.cone_cutoff);
+	for (int k = 0; k < 3; ++k)
+		put_u32(f, uint32_t(int8_t(bounds.cone_axis_s8[k])));
+	put_u32(f, uint32_t(int8_t(bounds.cone_cutoff_s8)));
+}
+
+static void cb_put_cluster(FILE* f, const Mesh& m, unsigned stride)
+{
+	put_u32(f, m.index_count);
+	put_u32(f, m.V);
+	put_u32(f, stride);
+	put_bytes(f, m.vertices.data(), m.vertices.size());
+	put_indices(f, m);
+
+	meshopt_Bounds bounds = meshopt_computeClusterBounds(m.has_indices ? m.indices.data() : NULL, m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, stride);
+	put_bounds(f, bounds);
+}
+
+static void gen_cb_cluster(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, T, stride;
+	};
+	static const Cfg kCfgs[] = {
+	    {64, 100, 12},
+	    {97, 150, 16},
+	    {16, 12, 12},
+	    {257, 300, 12},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_position_mesh(m, c.V, c.T, c.stride);
+		cb_put_cluster(f, m, c.stride);
+	}
+
+	// vcache-optimized indices (smoother cones)
+	{
+		Mesh m;
+		make_position_mesh(m, 64, 100, 12);
+		std::vector<unsigned> opt(m.index_count);
+		meshopt_optimizeVertexCache(opt.data(), m.indices.data(), m.index_count, m.V);
+		m.indices = opt;
+		cb_put_cluster(f, m, 12);
+	}
+
+	// all-degenerate cluster (no valid triangles => trivial reject)
+	{
+		Mesh m;
+		make_position_mesh(m, 32, 20, 12);
+		for (unsigned t = 0; t < 20; ++t)
+		{
+			m.indices[t * 3 + 1] = m.indices[t * 3 + 0];
+			m.indices[t * 3 + 2] = m.indices[t * 3 + 0];
+		}
+		cb_put_cluster(f, m, 12);
+	}
+
+	// single triangle
+	{
+		Mesh m;
+		make_position_mesh(m, 8, 1, 12);
+		m.indices[0] = 0, m.indices[1] = 1, m.indices[2] = 2;
+		cb_put_cluster(f, m, 12);
+	}
+
+	// coplanar fan around a center vertex (open cone)
+	{
+		Mesh m;
+		make_position_mesh(m, 16, 12, 12);
+		for (unsigned t = 0; t < 12; ++t)
+		{
+			m.indices[t * 3 + 0] = 0;
+			m.indices[t * 3 + 1] = 1 + t;
+			m.indices[t * 3 + 2] = 2 + t;
+		}
+		cb_put_cluster(f, m, 12);
+	}
+}
+
+static void gen_cb_meshlet(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, T, stride;
+	};
+	static const Cfg kCfgs[] = {
+	    {64, 100, 12},
+	    {97, 150, 16},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_position_mesh(m, c.V, c.T, c.stride);
+		MeshletCorpus mc = mc_make_meshlet(m.indices);
+
+		put_u32(f, unsigned(mc.vertices.size()));
+		put_u32(f, unsigned(mc.triangles.size() / 3));
+		put_u32(f, m.V);
+		put_u32(f, c.stride);
+		for (unsigned v : mc.vertices)
+			put_u32(f, v);
+		put_bytes(f, mc.triangles.data(), mc.triangles.size());
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+
+		meshopt_Bounds bounds = meshopt_computeMeshletBounds(mc.vertices.data(), mc.triangles.data(), mc.triangles.size() / 3, reinterpret_cast<const float*>(m.vertices.data()), m.V, c.stride);
+		put_bounds(f, bounds);
+	}
+
+	// optimized meshlet (level 3) bounds
+	{
+		Mesh m;
+		make_position_mesh(m, 64, 100, 12);
+		MeshletCorpus mc = mc_make_meshlet(m.indices);
+		meshopt_optimizeMeshletLevel(mc.vertices.data(), mc.vertices.size(), mc.triangles.data(), mc.triangles.size() / 3, 3);
+
+		put_u32(f, unsigned(mc.vertices.size()));
+		put_u32(f, unsigned(mc.triangles.size() / 3));
+		put_u32(f, m.V);
+		put_u32(f, 12);
+		for (unsigned v : mc.vertices)
+			put_u32(f, v);
+		put_bytes(f, mc.triangles.data(), mc.triangles.size());
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+
+		meshopt_Bounds bounds = meshopt_computeMeshletBounds(mc.vertices.data(), mc.triangles.data(), mc.triangles.size() / 3, reinterpret_cast<const float*>(m.vertices.data()), m.V, 12);
+		put_bounds(f, bounds);
+	}
+}
+
+static void gen_ms_optimize(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, T, level;
+	};
+	static const Cfg kCfgs[] = {
+	    {64, 100, 0}, {64, 100, 1}, {64, 100, 3}, {64, 100, 9},
+	    {16, 12, 0}, {16, 12, 2}, {1, 1, 0},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_mesh(m, c.V, c.T, 12, 12, true);
+		MeshletCorpus mc = mc_make_meshlet(m.indices);
+
+		put_u32(f, unsigned(mc.vertices.size()));
+		put_u32(f, unsigned(mc.triangles.size() / 3));
+		put_u32(f, c.level);
+		for (unsigned v : mc.vertices)
+			put_u32(f, v);
+		put_bytes(f, mc.triangles.data(), mc.triangles.size());
+
+		if (c.level == 0)
+			meshopt_optimizeMeshlet(mc.vertices.data(), mc.triangles.data(), mc.triangles.size() / 3, mc.vertices.size());
+		else
+			meshopt_optimizeMeshletLevel(mc.vertices.data(), mc.vertices.size(), mc.triangles.data(), mc.triangles.size() / 3, int(c.level));
+
+		for (unsigned v : mc.vertices)
+			put_u32(f, v);
+		put_bytes(f, mc.triangles.data(), mc.triangles.size());
+	}
+}
+
+static void ms_put_extract(FILE* f, const std::vector<unsigned>& indices)
+{
+	std::vector<unsigned> vertices(256);
+	std::vector<unsigned char> triangles(indices.size());
+	size_t unique = meshopt_extractMeshletIndices(vertices.data(), triangles.data(), indices.data(), indices.size());
+
+	put_u32(f, unsigned(indices.size()));
+	put_u32(f, unsigned(unique));
+	for (unsigned v : indices)
+		put_u32(f, v);
+	for (size_t i = 0; i < unique; ++i)
+		put_u32(f, vertices[i]);
+	put_bytes(f, triangles.data(), triangles.size());
+}
+
+static void gen_ms_extract(FILE* f)
+{
+	{
+		std::vector<unsigned> v;
+		ic_tri_range(v, 0, 1);
+		ms_put_extract(f, v);
+	}
+	{
+		std::vector<unsigned> v;
+		ic_tri_strip(v, 0, 100);
+		ms_put_extract(f, v);
+	}
+	{
+		Mesh m;
+		make_mesh(m, 64, 100, 12, 12, true);
+		ms_put_extract(f, m.indices);
+	}
+	{
+		// repeated triangle: heavy cache hits
+		std::vector<unsigned> v;
+		for (unsigned t = 0; t < 40; ++t)
+		{
+			v.push_back(0);
+			v.push_back(1);
+			v.push_back(2);
+		}
+		ms_put_extract(f, v);
+	}
+}
+
+static void ms_put_build(FILE* f, const Mesh& m, unsigned stride, unsigned variant, unsigned max_vertices, unsigned min_triangles, unsigned max_triangles, float weight)
+{
+	put_u32(f, m.index_count);
+	put_u32(f, m.V);
+	put_u32(f, stride);
+	put_u32(f, variant);
+	put_u32(f, max_vertices);
+	put_u32(f, min_triangles);
+	put_u32(f, max_triangles);
+	put_f32(f, weight);
+	put_bytes(f, m.vertices.data(), m.vertices.size());
+	put_indices(f, m);
+
+	std::vector<meshopt_Meshlet> meshlets(meshopt_buildMeshletsBound(m.index_count, max_vertices, min_triangles));
+	std::vector<unsigned> meshlet_vertices(m.index_count);
+	std::vector<unsigned char> meshlet_triangles(m.index_count);
+
+	size_t meshlet_count;
+	switch (variant)
+	{
+	case 0:
+		meshlet_count = meshopt_buildMeshlets(meshlets.data(), meshlet_vertices.data(), meshlet_triangles.data(), m.has_indices ? m.indices.data() : NULL, m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, stride, max_vertices, max_triangles, weight);
+		break;
+	case 1:
+		meshlet_count = meshopt_buildMeshletsScan(meshlets.data(), meshlet_vertices.data(), meshlet_triangles.data(), m.has_indices ? m.indices.data() : NULL, m.index_count, m.V, max_vertices, max_triangles);
+		break;
+	case 2:
+		meshlet_count = meshopt_buildMeshletsFlex(meshlets.data(), meshlet_vertices.data(), meshlet_triangles.data(), m.has_indices ? m.indices.data() : NULL, m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, stride, max_vertices, min_triangles, max_triangles, weight, 1.0f);
+		break;
+	default:
+		meshlet_count = meshopt_buildMeshletsSpatial(meshlets.data(), meshlet_vertices.data(), meshlet_triangles.data(), m.has_indices ? m.indices.data() : NULL, m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, stride, max_vertices, min_triangles, max_triangles, weight);
+		break;
+	}
+
+	put_u32(f, unsigned(meshlet_count));
+	for (size_t i = 0; i < meshlet_count; ++i)
+	{
+		put_u32(f, meshlets[i].vertex_offset);
+		put_u32(f, meshlets[i].triangle_offset);
+		put_u32(f, meshlets[i].vertex_count);
+		put_u32(f, meshlets[i].triangle_count);
+	}
+	for (unsigned v : meshlet_vertices)
+		put_u32(f, v);
+	put_bytes(f, meshlet_triangles.data(), meshlet_triangles.size());
+}
+
+static void gen_ms_build(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, T, stride, variant, max_vertices, min_triangles, max_triangles;
+		float weight;
+	};
+	static const Cfg kCfgs[] = {
+	    {64, 100, 12, 0, 64, 32, 32, 0.0f},
+	    {64, 100, 12, 0, 64, 32, 32, 1.0f},
+	    {97, 150, 16, 0, 32, 16, 32, 0.5f},
+	    {257, 300, 12, 0, 256, 256, 512, 0.0f},
+	    {64, 100, 12, 1, 64, 32, 32, 0.0f},
+	    {16, 12, 12, 1, 8, 4, 8, 0.0f},
+	    {64, 100, 12, 2, 64, 16, 32, 0.5f},
+	    {97, 150, 16, 2, 32, 8, 64, 0.0f},
+	    {64, 100, 12, 3, 64, 32, 32, 0.0f},
+	    {257, 300, 12, 3, 64, 32, 64, 1.0f},
+	    {16, 12, 12, 3, 16, 8, 16, 0.5f},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_position_mesh(m, c.V, c.T, c.stride);
+		ms_put_build(f, m, c.stride, c.variant, c.max_vertices, c.min_triangles, c.max_triangles, c.weight);
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc != 3)
@@ -2626,6 +3357,26 @@ int main(int argc, char** argv)
 		gen = gen_vf_enc_exp;
 	else if (strcmp(cmd, "vf-enc-color") == 0)
 		gen = gen_vf_enc_color;
+	else if (strcmp(cmd, "cb-sphere") == 0)
+		gen = gen_cb_sphere;
+	else if (strcmp(cmd, "mc-enc") == 0)
+		gen = gen_mc_enc;
+	else if (strcmp(cmd, "mc-dec") == 0)
+		gen = gen_mc_dec;
+	else if (strcmp(cmd, "mc-dec-raw") == 0)
+		gen = gen_mc_dec_raw;
+	else if (strcmp(cmd, "mc-hostile") == 0)
+		gen = gen_mc_hostile;
+	else if (strcmp(cmd, "cb-cluster") == 0)
+		gen = gen_cb_cluster;
+	else if (strcmp(cmd, "cb-meshlet") == 0)
+		gen = gen_cb_meshlet;
+	else if (strcmp(cmd, "ms-optimize") == 0)
+		gen = gen_ms_optimize;
+	else if (strcmp(cmd, "ms-extract") == 0)
+		gen = gen_ms_extract;
+	else if (strcmp(cmd, "ms-build") == 0)
+		gen = gen_ms_build;
 
 	if (!gen)
 	{
