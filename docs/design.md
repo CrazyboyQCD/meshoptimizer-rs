@@ -64,9 +64,15 @@ they are the designated seam if a workspace split ever happens ([ADR-0006](adr/0
 Upstream's largest units exceed the project's ~1000-line source-file budget. Planned splits
 (along algorithmic seams, tests stay colocated):
 
-- `simplifier.rs` → `simplifier/` directory: `adjacency.rs` (edge/vertex adjacency),
-  `quadric.rs` (attribute quadrics, collapse candidates), `simplify.rs` (public entry points),
-  `sloppy.rs`, `prune.rs`.
+- `simplifier.rs` → `simplifier/` directory (decided during P1.6): `adjacency.rs`
+  (edge/vertex adjacency + position remap + vertex classification), `quadric.rs`
+  (quadric construction/evaluation/solve), `collapse.rs` (collapse
+  selection/ranking/execution + fold quadrics + post-pass index/loop remapping),
+  `solve.rs` (quadric position/attribute solving for `WithUpdate`), `simplify.rs`
+  (collapse scheduling driver; the three thin public wrappers live in `mod.rs`
+  to keep the driver file under budget), `sloppy.rs` (grid-based indexed-mesh
+  simplification), `points.rs` (point-cloud simplification), `prune.rs`
+  (connected-component pruning).
 - `clusterizer.rs` → `clusterizer/` with `meshlets.rs` (build + flex machinery),
   `kdtree.rs` (kd-tree internals), `spatial.rs` (spatial builder + BVH),
   `optimize.rs` (optimize/extract helpers from `meshletutils.cpp`) and `bounds.rs`
@@ -173,7 +179,7 @@ commit series driven test-first ([TDD](tdd.md) §3/§6):
 
 ## 10. Open items
 
-- `simplifier`'s exact module split (§4) is decided during P1.6.
+- `simplifier`'s exact module split is decided (see §4, landed in P1.6).
 - Whether `generateNormals`/`remesh` need a cargo feature (SRS FR-18 note) is decided at P1.7
   based on their upstream stability at that time.
 - crates.io package name verification happens at publish time ([ADR-0008](adr/0008-licensing.md)).

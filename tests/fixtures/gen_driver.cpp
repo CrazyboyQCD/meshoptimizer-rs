@@ -161,6 +161,42 @@
 //                   out: u32 meshlet_count, per meshlet: u32 vertex_offset,
 //                        u32 triangle_offset, u32 vertex_count, u32 triangle_count,
 //                        vertices index_count u32, triangles index_count u8
+//
+// Simplifier commands (FR-09). Options/lock values are upstream enum values;
+// cases mix structured grid meshes (manifold interior + open border) with the
+// random position meshes (welded duplicates => seam/complex vertices):
+//   sp-simplify     repeat: hdr u32 V, u32 stride, u32 index_count, u32 options,
+//                            u32 target_index_count, f32 target_error, u32 has_lock
+//                   in: positions V*stride bytes, indices index_count u32,
+//                       [lock V bytes when has_lock]
+//                   out: u32 result_count, indices result_count u32, f32 result_error
+//   sp-attrs        repeat: hdr u32 V, u32 pos_stride, u32 attr_stride, u32 attr_count,
+//                            u32 index_count, u32 options, u32 target_index_count,
+//                            f32 target_error, u32 has_lock
+//                   in: positions V*pos_stride bytes, attributes V*attr_stride bytes,
+//                       weights attr_count f32, indices index_count u32,
+//                       [lock V bytes when has_lock]
+//                   out: u32 result_count, indices result_count u32, f32 result_error
+//   sp-update       repeat: (input layout identical to sp-attrs)
+//                   in: (as sp-attrs)
+//                   out: u32 result_count, indices result_count u32, f32 result_error,
+//                        positions V*pos_stride bytes, attributes V*attr_stride bytes
+//                        (input buffers after the destructive in-place update)
+//   sp-sloppy       repeat: hdr u32 V, u32 stride, u32 index_count,
+//                            u32 target_index_count, f32 target_error, u32 has_lock
+//                   in: positions V*stride bytes, indices index_count u32,
+//                       [lock V bytes when has_lock]
+//                   out: u32 result_count, indices result_count u32, f32 result_error
+//   sp-prune        repeat: hdr u32 V, u32 stride, u32 index_count, f32 target_error
+//                   in: positions V*stride bytes, indices index_count u32
+//                   out: u32 result_count, indices result_count u32
+//   sp-points       repeat: hdr u32 V, u32 pos_stride, u32 has_colors, u32 color_stride,
+//                            f32 color_weight, u32 target_vertex_count
+//                   in: positions V*pos_stride bytes, [colors V*color_stride bytes]
+//                   out: u32 result_count, indices result_count u32
+//   sp-scale        repeat: hdr u32 V, u32 stride
+//                   in: positions V*stride bytes
+//                   out: f32 extent
 
 #include "meshoptimizer.h"
 
@@ -3231,6 +3267,460 @@ static void gen_ms_build(FILE* f)
 	}
 }
 
+// --- simplifier ---------------------------------------------------------------
+
+// Structured grid mesh: manifold interior with an open border; consistent CCW
+// winding. `hole` removes a full column of cells (1 = middle column, 2 = quarter
+// column), splitting the grid into two connected components with equal /
+// asymmetric bounding spheres (for prune coverage).
+static void make_grid_mesh(Mesh& m, unsigned gw, unsigned gh, unsigned stride, unsigned hole)
+{
+	m.V = gw * gh;
+	m.has_indices = true;
+	m.vertices.assign(size_t(m.V) * stride, 0);
+
+	for (unsigned i = 0; i < m.V; ++i)
+	{
+		float p[3];
+		p[0] = float(i % gw) + float(lcg() % 8) / 32.f;
+		p[1] = float(i / gw) + float(lcg() % 8) / 32.f;
+		p[2] = float((i * 7 + (i / gw) * 13) % 5) / 4.f;
+		memcpy(&m.vertices[size_t(i) * stride], p, 12);
+	}
+
+	m.indices.clear();
+	for (unsigned y = 0; y + 1 < gh; ++y)
+		for (unsigned x = 0; x + 1 < gw; ++x)
+		{
+			if (hole == 1 && x == gw / 2)
+				continue;
+			if (hole == 2 && x == gw / 4)
+				continue;
+
+			unsigned v0 = y * gw + x;
+			unsigned v1 = v0 + 1, v2 = v0 + gw, v3 = v0 + gw + 1;
+			m.indices.push_back(v0), m.indices.push_back(v1), m.indices.push_back(v2);
+			m.indices.push_back(v1), m.indices.push_back(v3), m.indices.push_back(v2);
+		}
+	m.index_count = unsigned(m.indices.size());
+}
+
+// vertex_lock streams for simplifier cases; gw == 0 (random mesh) skips the ring.
+// kinds: 1 = Lock on grid border ring, 2 = Protect scattered, 3 = Priority
+// scattered, 4 = Lock scattered
+static std::vector<unsigned char> make_lock(unsigned kind, unsigned V, unsigned gw)
+{
+	std::vector<unsigned char> lock;
+	if (kind == 0)
+		return lock;
+
+	lock.assign(V, 0);
+
+	if (kind == 1)
+	{
+		for (unsigned i = 0; i < V; ++i)
+		{
+			unsigned x = i % gw, y = i / gw;
+			if (x == 0 || y == 0 || x == gw - 1 || y == gw - 1)
+				lock[i] = meshopt_SimplifyVertex_Lock;
+		}
+	}
+	else
+	{
+		unsigned char flag = kind == 2 ? meshopt_SimplifyVertex_Protect : kind == 3 ? meshopt_SimplifyVertex_Priority : meshopt_SimplifyVertex_Lock;
+		unsigned period = kind == 2 ? 11 : kind == 3 ? 7 : 5;
+		for (unsigned i = 0; i < V; i += period)
+			lock[i] = flag;
+	}
+
+	return lock;
+}
+
+static void sp_fill_attributes(std::vector<unsigned char>& attrs, unsigned V, unsigned attr_stride, unsigned attr_count)
+{
+	attrs.assign(size_t(V) * attr_stride, 0);
+	for (unsigned i = 0; i < V; ++i)
+		for (unsigned k = 0; k < attr_count; ++k)
+		{
+			float a = float(lcg() % 64) / 8.f;
+			memcpy(&attrs[size_t(i) * attr_stride + k * 4], &a, 4);
+		}
+}
+
+// Position-derived attributes for grid meshes; smooth enough across vertices that
+// attribute error does not dominate the collapse error limit.
+static void sp_fill_smooth_attributes(std::vector<unsigned char>& attrs, unsigned gw, unsigned gh, unsigned attr_stride, unsigned attr_count)
+{
+	unsigned V = gw * gh;
+	attrs.assign(size_t(V) * attr_stride, 0);
+	for (unsigned i = 0; i < V; ++i)
+		for (unsigned k = 0; k < attr_count; ++k)
+		{
+			float a = float((i % gw) + (i / gw) * 2) / 16.f + float(k) / 8.f;
+			memcpy(&attrs[size_t(i) * attr_stride + k * 4], &a, 4);
+		}
+}
+
+static void gen_sp_simplify(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh, hole; // gw == 0: random mesh V/T
+		unsigned V, T, stride;
+		unsigned options, tn, td, lock_kind;
+		float target_error;
+	};
+	static const Cfg kCfgs[] = {
+	    {12, 12, 0, 0, 0, 12, 0, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 16, meshopt_SimplifyLockBorder, 1, 4, 0, 0.f},
+	    {16, 16, 1, 0, 0, 12, meshopt_SimplifyPrune, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifySparse, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifyErrorAbsolute, 1, 2, 0, 0.01f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifyRegularize, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifyRegularizeLight, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifyPreserveFolds, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifyPermissive, 1, 2, 2, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, meshopt_SimplifyPermissive | meshopt_SimplifyLockBorder, 1, 2, 3, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, 0, 1, 2, 1, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, 0, 1, 2, 4, 0.f},
+	    {0, 0, 0, 64, 100, 12, 0, 1, 2, 0, 1e-1f},
+	    {0, 0, 0, 97, 150, 16, meshopt_SimplifySparse | meshopt_SimplifyLockBorder, 3, 4, 0, 0.f},
+	    {0, 0, 0, 257, 300, 12, meshopt_SimplifyPrune | meshopt_SimplifySparse, 1, 2, 0, 1e-1f},
+	    {4, 4, 0, 0, 0, 12, 0, 0, 1, 0, 1e-2f},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		unsigned gw = c.gw;
+		if (gw)
+			make_grid_mesh(m, gw, c.gh, c.stride, c.hole != 0);
+		else
+			make_position_mesh(m, c.V, c.T, c.stride);
+
+		std::vector<unsigned char> lock = make_lock(c.lock_kind, m.V, gw);
+		unsigned target = m.index_count * c.tn / c.td;
+
+		put_u32(f, m.V);
+		put_u32(f, c.stride);
+		put_u32(f, m.index_count);
+		put_u32(f, c.options);
+		put_u32(f, target);
+		put_f32(f, c.target_error);
+		put_u32(f, lock.empty() ? 0u : 1u);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_indices(f, m);
+		if (!lock.empty())
+			put_bytes(f, lock.data(), lock.size());
+
+		std::vector<unsigned> out(m.index_count, 0xee);
+		float result_error = 0;
+		size_t result = meshopt_simplify(out.data(), m.indices.data(), m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, c.stride, target, c.target_error, c.options, &result_error);
+		put_u32(f, unsigned(result));
+		for (size_t i = 0; i < result; ++i)
+			put_u32(f, out[i]);
+		put_f32(f, result_error);
+	}
+}
+
+static void gen_sp_attrs(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh, hole;
+		unsigned V, T, stride, attr_stride, attr_count;
+		unsigned options, tn, td, lock_kind;
+		float target_error;
+	};
+	static const Cfg kCfgs[] = {
+	    {12, 12, 0, 0, 0, 12, 12, 3, 0, 1, 2, 0, 1e-1f},
+	    {12, 12, 0, 0, 0, 12, 12, 3, meshopt_SimplifyErrorClamped, 1, 2, 0, 1e-2f},
+	    {12, 12, 0, 0, 0, 12, 12, 3, meshopt_SimplifySparse, 1, 2, 0, 1e-1f},
+	    {12, 12, 0, 0, 0, 12, 12, 3, meshopt_SimplifyPermissive, 1, 2, 2, 1e-1f},
+	    {16, 16, 1, 0, 0, 12, 12, 3, meshopt_SimplifyPrune | meshopt_SimplifyErrorClamped, 1, 2, 0, 1e-2f},
+	    {0, 0, 0, 64, 100, 12, 16, 4, 0, 1, 2, 0, 1e-1f},
+	    {0, 0, 0, 97, 150, 16, 12, 3, meshopt_SimplifySparse | meshopt_SimplifyErrorClamped, 1, 2, 4, 1e-1f},
+	};
+
+	static const float kWeights3[3] = {1.f, 0.5f, 0.f};
+	static const float kWeights4[4] = {1.f, 0.25f, 0.5f, 0.f};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		unsigned gw = c.gw;
+		if (gw)
+			make_grid_mesh(m, gw, c.gh, c.stride, c.hole);
+		else
+			make_position_mesh(m, c.V, c.T, c.stride);
+
+		const float* weights = c.attr_count == 3 ? kWeights3 : kWeights4;
+		std::vector<unsigned char> attrs;
+		if (gw)
+			sp_fill_smooth_attributes(attrs, gw, c.gh, c.attr_stride, c.attr_count);
+		else
+			sp_fill_attributes(attrs, m.V, c.attr_stride, c.attr_count);
+		std::vector<unsigned char> lock = make_lock(c.lock_kind, m.V, gw);
+		unsigned target = m.index_count * c.tn / c.td;
+
+		put_u32(f, m.V);
+		put_u32(f, c.stride);
+		put_u32(f, c.attr_stride);
+		put_u32(f, c.attr_count);
+		put_u32(f, m.index_count);
+		put_u32(f, c.options);
+		put_u32(f, target);
+		put_f32(f, c.target_error);
+		put_u32(f, lock.empty() ? 0u : 1u);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_bytes(f, attrs.data(), attrs.size());
+		for (unsigned k = 0; k < c.attr_count; ++k)
+			put_f32(f, weights[k]);
+		put_indices(f, m);
+		if (!lock.empty())
+			put_bytes(f, lock.data(), lock.size());
+
+		std::vector<unsigned> out(m.index_count, 0xee);
+		float result_error = 0;
+		size_t result = meshopt_simplifyWithAttributes(out.data(), m.indices.data(), m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, c.stride, reinterpret_cast<const float*>(attrs.data()), c.attr_stride, weights, c.attr_count, lock.empty() ? NULL : lock.data(), target, c.target_error, c.options, &result_error);
+		put_u32(f, unsigned(result));
+		for (size_t i = 0; i < result; ++i)
+			put_u32(f, out[i]);
+		put_f32(f, result_error);
+	}
+}
+
+static void gen_sp_update(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh;
+		unsigned stride, attr_stride, attr_count;
+		unsigned options, tn, td, lock_kind;
+		float target_error;
+	};
+	static const Cfg kCfgs[] = {
+	    {10, 10, 12, 12, 2, 0, 1, 2, 0, 1e-1f},
+	    {10, 10, 12, 0, 0, 0, 1, 2, 0, 1e-2f},
+	    {12, 12, 12, 12, 3, meshopt_SimplifySparse, 1, 2, 4, 1e-1f},
+	};
+
+	static const float kWeights2[2] = {1.f, 0.25f};
+	static const float kWeights3[3] = {1.f, 0.5f, 0.f};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_grid_mesh(m, c.gw, c.gh, c.stride, 0);
+
+		const float* weights = c.attr_count == 2 ? kWeights2 : kWeights3;
+		std::vector<unsigned char> attrs;
+		if (c.attr_count)
+			sp_fill_smooth_attributes(attrs, c.gw, c.gh, c.attr_stride, c.attr_count);
+		std::vector<unsigned char> lock = make_lock(c.lock_kind, m.V, c.gw);
+		unsigned target = m.index_count * c.tn / c.td;
+
+		put_u32(f, m.V);
+		put_u32(f, c.stride);
+		put_u32(f, c.attr_stride);
+		put_u32(f, c.attr_count);
+		put_u32(f, m.index_count);
+		put_u32(f, c.options);
+		put_u32(f, target);
+		put_f32(f, c.target_error);
+		put_u32(f, lock.empty() ? 0u : 1u);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_bytes(f, attrs.data(), attrs.size());
+		for (unsigned k = 0; k < c.attr_count; ++k)
+			put_f32(f, weights[k]);
+		put_indices(f, m);
+		if (!lock.empty())
+			put_bytes(f, lock.data(), lock.size());
+
+		float result_error = 0;
+		size_t result = meshopt_simplifyWithUpdate(m.indices.data(), m.index_count, reinterpret_cast<float*>(m.vertices.data()), m.V, c.stride, c.attr_count ? reinterpret_cast<float*>(attrs.data()) : NULL, c.attr_stride, weights, c.attr_count, lock.empty() ? NULL : lock.data(), target, c.target_error, c.options, &result_error);
+		put_u32(f, unsigned(result));
+		for (size_t i = 0; i < result; ++i)
+			put_u32(f, m.indices[i]);
+		put_f32(f, result_error);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_bytes(f, attrs.data(), attrs.size());
+	}
+}
+
+static void gen_sp_sloppy(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh;
+		unsigned V, T, stride;
+		unsigned tn, td, lock_kind;
+		float target_error;
+	};
+	static const Cfg kCfgs[] = {
+	    {12, 12, 0, 0, 12, 1, 2, 0, 1e-1f},
+	    {12, 12, 0, 0, 12, 1, 4, 0, 0.f},
+	    {12, 12, 0, 0, 12, 0, 1, 0, 0.f},
+	    {0, 0, 97, 150, 16, 1, 2, 0, 0.5f},
+	    {12, 12, 0, 0, 12, 1, 2, 1, 1e-1f},
+	    {0, 0, 64, 100, 12, 1, 2, 4, 5.f},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		unsigned gw = c.gw;
+		if (gw)
+			make_grid_mesh(m, gw, c.gh, c.stride, 0);
+		else
+			make_position_mesh(m, c.V, c.T, c.stride);
+
+		std::vector<unsigned char> lock = make_lock(c.lock_kind, m.V, gw);
+		unsigned target = m.index_count * c.tn / c.td;
+
+		put_u32(f, m.V);
+		put_u32(f, c.stride);
+		put_u32(f, m.index_count);
+		put_u32(f, target);
+		put_f32(f, c.target_error);
+		put_u32(f, lock.empty() ? 0u : 1u);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_indices(f, m);
+		if (!lock.empty())
+			put_bytes(f, lock.data(), lock.size());
+
+		std::vector<unsigned> out(m.index_count, 0xee);
+		float result_error = 0;
+		size_t result = meshopt_simplifySloppy(out.data(), m.indices.data(), m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, c.stride, lock.empty() ? NULL : lock.data(), target, c.target_error, &result_error);
+		put_u32(f, unsigned(result));
+		for (size_t i = 0; i < result; ++i)
+			put_u32(f, out[i]);
+		put_f32(f, result_error);
+	}
+}
+
+static void gen_sp_prune(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh, hole;
+		unsigned V, T, stride;
+		float target_error;
+	};
+	static const Cfg kCfgs[] = {
+	    {16, 16, 1, 0, 0, 12, 0.55f},
+	    {16, 16, 1, 0, 0, 12, 0.6f},
+	    {16, 16, 2, 0, 0, 12, 0.52f},
+	    {16, 16, 2, 0, 0, 12, 0.62f},
+	    {12, 12, 0, 0, 0, 12, 0.f},
+	    {0, 0, 0, 64, 100, 12, 0.1f},
+	    {0, 0, 0, 257, 300, 12, 0.5f},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		unsigned gw = c.gw;
+		if (gw)
+			make_grid_mesh(m, gw, c.gh, c.stride, c.hole);
+		else
+			make_position_mesh(m, c.V, c.T, c.stride);
+
+		put_u32(f, m.V);
+		put_u32(f, c.stride);
+		put_u32(f, m.index_count);
+		put_f32(f, c.target_error);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_indices(f, m);
+
+		std::vector<unsigned> out(m.index_count, 0xee);
+		size_t result = meshopt_simplifyPrune(out.data(), m.indices.data(), m.index_count, reinterpret_cast<const float*>(m.vertices.data()), m.V, c.stride, c.target_error);
+		put_u32(f, unsigned(result));
+		for (size_t i = 0; i < result; ++i)
+			put_u32(f, out[i]);
+	}
+}
+
+static void gen_sp_points(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, stride, has_colors, color_stride;
+		float color_weight, target;
+	};
+	static const Cfg kCfgs[] = {
+	    {100, 12, 0, 0, 0.f, 50},
+	    {100, 16, 1, 12, 0.5f, 30},
+	    {100, 12, 1, 16, 2.f, 100},
+	    {200, 12, 0, 0, 0.f, 33},
+	    {50, 12, 0, 0, 0.f, 0},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_positions(m, c.V, 0, c.stride, false);
+
+		std::vector<unsigned char> colors;
+		if (c.has_colors)
+		{
+			colors.assign(size_t(c.V) * c.color_stride, 0);
+			for (unsigned i = 0; i < c.V; ++i)
+				for (unsigned k = 0; k < 3; ++k)
+				{
+					float a = float(lcg() % 256) / 16.f;
+					memcpy(&colors[size_t(i) * c.color_stride + k * 4], &a, 4);
+				}
+		}
+
+		put_u32(f, c.V);
+		put_u32(f, c.stride);
+		put_u32(f, c.has_colors);
+		put_u32(f, c.has_colors ? c.color_stride : 0);
+		put_f32(f, c.color_weight);
+		put_u32(f, unsigned(c.target));
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		if (c.has_colors)
+			put_bytes(f, colors.data(), colors.size());
+
+		std::vector<unsigned> out(size_t(c.target) + 1, 0xee);
+		size_t result = meshopt_simplifyPoints(out.data(), reinterpret_cast<const float*>(m.vertices.data()), c.V, c.stride, c.has_colors ? reinterpret_cast<const float*>(colors.data()) : NULL, c.has_colors ? c.color_stride : 0, c.color_weight, unsigned(c.target));
+		put_u32(f, unsigned(result));
+		for (size_t i = 0; i < result; ++i)
+			put_u32(f, out[i]);
+	}
+}
+
+static void gen_sp_scale(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned V, stride, constant;
+	};
+	static const Cfg kCfgs[] = {
+	    {64, 12, 0},
+	    {1, 12, 0},
+	    {33, 12, 1},
+	    {97, 16, 0},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		make_positions(m, c.V, 0, c.stride, false);
+		if (c.constant)
+			for (unsigned i = 1; i < c.V; ++i)
+				memcpy(&m.vertices[size_t(i) * c.stride], &m.vertices[0], 12);
+
+		put_u32(f, c.V);
+		put_u32(f, c.stride);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+
+		float extent = meshopt_simplifyScale(reinterpret_cast<const float*>(m.vertices.data()), c.V, c.stride);
+		put_f32(f, extent);
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc != 3)
@@ -3377,6 +3867,20 @@ int main(int argc, char** argv)
 		gen = gen_ms_extract;
 	else if (strcmp(cmd, "ms-build") == 0)
 		gen = gen_ms_build;
+	else if (strcmp(cmd, "sp-simplify") == 0)
+		gen = gen_sp_simplify;
+	else if (strcmp(cmd, "sp-attrs") == 0)
+		gen = gen_sp_attrs;
+	else if (strcmp(cmd, "sp-update") == 0)
+		gen = gen_sp_update;
+	else if (strcmp(cmd, "sp-sloppy") == 0)
+		gen = gen_sp_sloppy;
+	else if (strcmp(cmd, "sp-prune") == 0)
+		gen = gen_sp_prune;
+	else if (strcmp(cmd, "sp-points") == 0)
+		gen = gen_sp_points;
+	else if (strcmp(cmd, "sp-scale") == 0)
+		gen = gen_sp_scale;
 
 	if (!gen)
 	{
