@@ -169,10 +169,8 @@ pub(crate) fn compute_cluster_bounds_core(
     let mut normals = [[0.0f32; 4]; MESHLET_MAX_TRIANGLES];
     let mut triangles = 0usize;
 
-    for i in (0..indices.len()).step_by(3) {
-        let a = indices[i] as usize;
-        let b = indices[i + 1] as usize;
-        let c = indices[i + 2] as usize;
+    for &[a, b, c] in indices.as_chunks::<3>().0 {
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         let p0 = &vertex_positions[vertex_stride_float * a..];
         let p1 = &vertex_positions[vertex_stride_float * b..];

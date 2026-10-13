@@ -267,11 +267,7 @@ fn filter_index_buffer_impl(destination: &mut [u32], indices: &[u32], remap: &[u
 
     let mut write = 0usize;
 
-    for face in 0..face_count {
-        let i0 = indices[face * 3];
-        let i1 = indices[face * 3 + 1];
-        let i2 = indices[face * 3 + 2];
-
+    for &[i0, i1, i2] in indices.as_chunks::<3>().0 {
         let mut ra = remap[i0 as usize];
         let mut rb = remap[i1 as usize];
         let mut rc = remap[i2 as usize];

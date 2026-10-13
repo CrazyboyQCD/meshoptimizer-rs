@@ -53,11 +53,7 @@ pub fn opacity_map_measure(
 
     let mut result = 0usize;
 
-    for t in 0..triangle_count {
-        let a = indices[t * 3];
-        let b = indices[t * 3 + 1];
-        let c = indices[t * 3 + 2];
-
+    for (t, &[a, b, c]) in indices.as_chunks::<3>().0.iter().enumerate() {
         let u0 = vertex_uvs[a as usize * vertex_stride_float];
         let v0 = vertex_uvs[a as usize * vertex_stride_float + 1];
         let u1 = vertex_uvs[b as usize * vertex_stride_float];

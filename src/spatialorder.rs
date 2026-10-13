@@ -319,30 +319,32 @@ pub fn spatial_sort_triangles(
 
     let mut centroids = vec![0f32; face_count * 3];
 
-    for i in 0..face_count {
-        let a = indices[i * 3] as usize;
-        let b = indices[i * 3 + 1] as usize;
-        let c = indices[i * 3 + 2] as usize;
+    for (tri_out, tri_in) in centroids
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(indices.as_chunks::<3>().0)
+    {
+        let [a, b, c] = *tri_in;
+        let (a, b, c) = (a as usize, b as usize, c as usize);
         debug_assert!(a < vertex_count && b < vertex_count && c < vertex_count);
 
         let va = &vertex_positions[a * vertex_stride_float..][..3];
         let vb = &vertex_positions[b * vertex_stride_float..][..3];
         let vc = &vertex_positions[c * vertex_stride_float..][..3];
 
-        centroids[i * 3] = (va[0] + vb[0] + vc[0]) / 3.0;
-        centroids[i * 3 + 1] = (va[1] + vb[1] + vc[1]) / 3.0;
-        centroids[i * 3 + 2] = (va[2] + vb[2] + vc[2]) / 3.0;
+        tri_out[0] = (va[0] + vb[0] + vc[0]) / 3.0;
+        tri_out[1] = (va[1] + vb[1] + vc[1]) / 3.0;
+        tri_out[2] = (va[2] + vb[2] + vc[2]) / 3.0;
     }
 
     let mut remap = vec![0u32; face_count];
 
     spatial_sort_remap(&mut remap, &centroids, 12);
 
-    for i in 0..face_count {
-        let a = indices[i * 3];
-        let b = indices[i * 3 + 1];
-        let c = indices[i * 3 + 2];
-        let r = remap[i] as usize;
+    for (tri, &r) in indices.as_chunks::<3>().0.iter().zip(remap.iter()) {
+        let [a, b, c] = *tri;
+        let r = r as usize;
 
         destination[r * 3] = a;
         destination[r * 3 + 1] = b;

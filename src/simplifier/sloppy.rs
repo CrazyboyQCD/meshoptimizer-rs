@@ -46,10 +46,10 @@ pub(crate) fn compute_vertex_ids(
 pub(crate) fn count_triangles(vertex_ids: &[u32], indices: &[u32], index_count: usize) -> usize {
     let mut result = 0usize;
 
-    for i in (0..index_count).step_by(3) {
-        let id0 = vertex_ids[indices[i] as usize];
-        let id1 = vertex_ids[indices[i + 1] as usize];
-        let id2 = vertex_ids[indices[i + 2] as usize];
+    for &[a, b, c] in &indices.as_chunks::<3>().0[..index_count / 3] {
+        let id0 = vertex_ids[a as usize];
+        let id1 = vertex_ids[b as usize];
+        let id2 = vertex_ids[c as usize];
 
         result += (id0 != id1 && id0 != id2 && id1 != id2) as usize;
     }
@@ -96,10 +96,10 @@ pub(crate) fn fill_cell_quadrics(
     vertex_positions: &[Vector3],
     vertex_cells: &[u32],
 ) {
-    for i in (0..index_count).step_by(3) {
-        let i0 = indices[i] as usize;
-        let i1 = indices[i + 1] as usize;
-        let i2 = indices[i + 2] as usize;
+    for &[i0, i1, i2] in &indices.as_chunks::<3>().0[..index_count / 3] {
+        let i0 = i0 as usize;
+        let i1 = i1 as usize;
+        let i2 = i2 as usize;
 
         let c0 = vertex_cells[i0];
         let c1 = vertex_cells[i1];
@@ -164,10 +164,10 @@ pub(crate) fn filter_triangles(
 
     let mut result = 0usize;
 
-    for i in (0..index_count).step_by(3) {
-        let c0 = vertex_cells[indices[i] as usize];
-        let c1 = vertex_cells[indices[i + 1] as usize];
-        let c2 = vertex_cells[indices[i + 2] as usize];
+    for &[v0, v1, v2] in &indices.as_chunks::<3>().0[..index_count / 3] {
+        let c0 = vertex_cells[v0 as usize];
+        let c1 = vertex_cells[v1 as usize];
+        let c2 = vertex_cells[v2 as usize];
 
         if c0 != c1 && c0 != c2 && c1 != c2 {
             let mut a = cell_remap[c0 as usize];

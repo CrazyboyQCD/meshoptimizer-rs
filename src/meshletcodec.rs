@@ -71,10 +71,13 @@ fn encode_triangles(
 
     let mut extra_pos = 0usize;
 
-    for i in 0..triangle_count {
-        let t0 = triangles[i * 3] as u32;
-        let t1 = triangles[i * 3 + 1] as u32;
-        let t2 = triangles[i * 3 + 2] as u32;
+    for (i, tri) in triangles.as_chunks::<3>().0[..triangle_count]
+        .iter()
+        .enumerate()
+    {
+        let t0 = tri[0] as u32;
+        let t1 = tri[1] as u32;
+        let t2 = tri[2] as u32;
 
         let fer = get_edge_fifo8(&edgefifo, t0, t1, t2, edgefifooffset);
 
@@ -82,9 +85,9 @@ fn encode_triangles(
             // getEdgeFifo8 implicitly rotates triangles by matching a/b to existing edge
             let order = &ROTATIONS[(fer & 3) as usize..];
 
-            let a = triangles[i * 3 + order[0]] as u32;
-            let b = triangles[i * 3 + order[1]] as u32;
-            let c = triangles[i * 3 + order[2]] as u32;
+            let a = tri[order[0]] as u32;
+            let b = tri[order[1]] as u32;
+            let c = tri[order[2]] as u32;
 
             let fec = if c == next {
                 next += 1;

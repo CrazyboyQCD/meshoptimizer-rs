@@ -51,9 +51,8 @@ pub fn optimize_meshlet_level(
 
         let mut j = i;
         while j < triangle_count {
-            let a = indices[j * 3] as usize;
-            let b = indices[j * 3 + 1] as usize;
-            let c = indices[j * 3 + 2] as usize;
+            let [a, b, c] = indices.as_chunks::<3>().0[j];
+            let (a, b, c) = (a as usize, b as usize, c as usize);
 
             // compute cache distance using unsigned 8-bit subtraction, so cache timestamp overflow is handled gracefully
             let ad = cache_last.wrapping_sub(cache[a]);
@@ -104,9 +103,7 @@ pub fn optimize_meshlet_level(
 
         let next = next as usize;
 
-        let a = indices[next * 3];
-        let b = indices[next * 3 + 1];
-        let c = indices[next * 3 + 2];
+        let [a, b, c] = indices.as_chunks::<3>().0[next];
 
         // shift triangles before the next one forward so that we always keep an ordered partition
         // note: this could have swapped triangles [i] and [next] but that distorts the order and may skew the output sequence
@@ -157,9 +154,7 @@ pub fn optimize_meshlet_level(
 
                 let mut j = i + 1;
                 while j < triangle_count && j <= i + CACHE_CUTOFF as usize {
-                    let oa = indices[j * 3];
-                    let ob = indices[j * 3 + 1];
-                    let oc = indices[j * 3 + 2];
+                    let [oa, ob, oc] = indices.as_chunks::<3>().0[j];
 
                     // note: edge comparisons are reversed as reused edges are flipped
                     needab |= (oa == b && ob == a) || (ob == b && oc == a) || (oc == b && oa == a);

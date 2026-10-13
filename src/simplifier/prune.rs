@@ -24,7 +24,7 @@ pub(crate) fn build_components(
     components: &mut [u32],
     vertex_count: usize,
     indices: &[u32],
-    index_count: usize,
+    _index_count: usize,
     remap: &[u32],
 ) -> usize {
     for i in 0..vertex_count {
@@ -34,10 +34,10 @@ pub(crate) fn build_components(
     // compute a unique (but not sequential!) index for each component via union-find
     const NEXT: [usize; 4] = [1, 2, 0, 1];
 
-    for i in (0..index_count).step_by(3) {
+    for corners in indices.as_chunks::<3>().0 {
         for e in 0..3 {
-            let i0 = indices[i + e];
-            let i1 = indices[i + NEXT[e]];
+            let i0 = corners[e];
+            let i1 = corners[NEXT[e]];
 
             let r0 = remap[i0 as usize];
             let r1 = remap[i1 as usize];

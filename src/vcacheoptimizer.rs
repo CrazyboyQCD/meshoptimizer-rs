@@ -382,6 +382,8 @@ pub fn optimize_vertex_cache_fifo(
     // cache time stamps
     let mut cache_timestamps = vec![0u32; vertex_count];
 
+    let triangles_chunked = indices.as_chunks::<3>().0;
+
     // dead-end stack
     let mut dead_end = vec![0u32; index_count];
     let mut dead_end_top = 0usize;
@@ -408,9 +410,7 @@ pub fn optimize_vertex_cache_fifo(
             let triangle = data[neighbors_begin + ni];
 
             if emitted_flags[triangle as usize] == 0 {
-                let a = indices[triangle as usize * 3];
-                let b = indices[triangle as usize * 3 + 1];
-                let c = indices[triangle as usize * 3 + 2];
+                let [a, b, c] = triangles_chunked[triangle as usize];
 
                 // output indices
                 destination[output_triangle * 3] = a;

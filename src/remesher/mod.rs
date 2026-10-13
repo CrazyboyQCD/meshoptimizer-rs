@@ -286,10 +286,8 @@ fn voxelize(
 ) {
     let vertex_stride_float = vertex_positions_stride / 4;
 
-    for t in 0..indices.len() / 3 {
-        let a = indices[t * 3] as usize;
-        let b = indices[t * 3 + 1] as usize;
-        let c = indices[t * 3 + 2] as usize;
+    for &[a, b, c] in indices.as_chunks::<3>().0 {
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         let va = &vertex_positions[a * vertex_stride_float..];
         let vb = &vertex_positions[b * vertex_stride_float..];

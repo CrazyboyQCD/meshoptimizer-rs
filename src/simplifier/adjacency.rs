@@ -90,19 +90,17 @@ impl EdgeAdjacency {
         // fill offset table
         let mut offset = 0u32;
 
-        for i in 0..vertex_count {
-            let count = offsets[i];
-            offsets[i] = offset;
+        for o in offsets.iter_mut() {
+            let count = *o;
+            *o = offset;
             offset += count;
         }
 
         debug_assert_eq!(offset as usize, index_count);
 
         // fill edge data
-        for i in 0..face_count {
-            let mut a = indices[i * 3];
-            let mut b = indices[i * 3 + 1];
-            let mut c = indices[i * 3 + 2];
+        for tri in &indices.as_chunks::<3>().0[..face_count] {
+            let [mut a, mut b, mut c] = *tri;
 
             if let Some(r) = remap {
                 a = r[a as usize];

@@ -207,15 +207,13 @@ fn generate_hard_boundaries(
 
     let mut timestamp = cache_size + 1;
 
-    let face_count = indices.len() / 3;
-
     let mut result = 0usize;
 
-    for i in 0..face_count {
+    for (i, tri) in indices.as_chunks::<3>().0.iter().enumerate() {
         let m = update_cache(
-            indices[i * 3],
-            indices[i * 3 + 1],
-            indices[i * 3 + 2],
+            tri[0],
+            tri[1],
+            tri[2],
             cache_size,
             cache_timestamps,
             &mut timestamp,
@@ -267,11 +265,11 @@ fn generate_soft_boundaries(
         // measure cluster ACMR
         let mut cluster_misses = 0u32;
 
-        for i in start..end {
+        for tri in &indices.as_chunks::<3>().0[start..end] {
             let m = update_cache(
-                indices[i * 3],
-                indices[i * 3 + 1],
-                indices[i * 3 + 2],
+                tri[0],
+                tri[1],
+                tri[2],
                 cache_size,
                 cache_timestamps,
                 &mut timestamp,
@@ -292,11 +290,11 @@ fn generate_soft_boundaries(
         let mut running_misses = 0u32;
         let mut running_faces = 0u32;
 
-        for i in start..end {
+        for (fi, tri) in indices.as_chunks::<3>().0[start..end].iter().enumerate() {
             let m = update_cache(
-                indices[i * 3],
-                indices[i * 3 + 1],
-                indices[i * 3 + 2],
+                tri[0],
+                tri[1],
+                tri[2],
                 cache_size,
                 cache_timestamps,
                 &mut timestamp,
@@ -310,7 +308,7 @@ fn generate_soft_boundaries(
                 // a new cluster on the next one; note that this may mean that we add `end` to
                 // destination for the last triangle, which will imply that the last cluster is
                 // empty; however, the trim after the loop will clean it up
-                destination[result] = (i + 1) as u32;
+                destination[result] = (start + fi + 1) as u32;
                 result += 1;
 
                 // reset cache

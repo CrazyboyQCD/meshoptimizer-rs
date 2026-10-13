@@ -519,11 +519,7 @@ pub(crate) fn fill_face_quadrics(
     vertex_positions: &[Vector3],
     remap: &[u32],
 ) {
-    for i in (0..index_count).step_by(3) {
-        let i0 = indices[i];
-        let i1 = indices[i + 1];
-        let i2 = indices[i + 2];
-
+    for &[i0, i1, i2] in &indices.as_chunks::<3>().0[..index_count / 3] {
         let mut q = Quadric::ZERO;
         quadric_from_triangle(
             &mut q,
@@ -604,10 +600,10 @@ pub(crate) fn fill_edge_quadrics(
 ) {
     const NEXT: [usize; 4] = [1, 2, 0, 1];
 
-    for i in (0..index_count).step_by(3) {
+    for corners in &indices.as_chunks::<3>().0[..index_count / 3] {
         for e in 0..3 {
-            let i0 = indices[i + e];
-            let i1 = indices[i + NEXT[e]];
+            let i0 = corners[e];
+            let i1 = corners[NEXT[e]];
 
             let k0 = vertex_kind[i0 as usize];
             let k1 = vertex_kind[i1 as usize];
@@ -647,7 +643,7 @@ pub(crate) fn fill_edge_quadrics(
                 continue;
             }
 
-            let i2 = indices[i + NEXT[e + 1]];
+            let i2 = corners[NEXT[e + 1]];
 
             // we try hard to maintain border edge geometry; seam edges can move more freely
             // due to topological restrictions on collapses, seam quadrics slightly improve collapse structure but aren't critical
@@ -700,11 +696,7 @@ pub(crate) fn fill_attribute_quadrics(
     let mut qa = Quadric::ZERO;
     let mut g = vec![QuadricGrad::ZERO; attribute_count];
 
-    for i in (0..index_count).step_by(3) {
-        let i0 = indices[i];
-        let i1 = indices[i + 1];
-        let i2 = indices[i + 2];
-
+    for &[i0, i1, i2] in &indices.as_chunks::<3>().0[..index_count / 3] {
         quadric_from_attributes(
             &mut qa,
             &mut g,

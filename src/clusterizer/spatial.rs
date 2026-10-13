@@ -97,10 +97,9 @@ fn bvh_prepare(
 ) {
     let face_count = indices.len() / 3;
 
-    for i in 0..face_count {
-        let a = indices[i * 3] as usize;
-        let b = indices[i * 3 + 1] as usize;
-        let c = indices[i * 3 + 2] as usize;
+    for (i, tri) in indices.as_chunks::<3>().0.iter().enumerate() {
+        let [a, b, c] = *tri;
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         let va = &vertex_positions[vertex_stride_float * a..];
         let vb = &vertex_positions[vertex_stride_float * b..];
@@ -136,10 +135,10 @@ fn bvh_count_vertices(
 ) -> usize {
     // count number of unique vertices
     let mut used_vertices = 0usize;
+    let triangles_chunked = indices.as_chunks::<3>().0;
     for (i, &index) in order.iter().enumerate() {
-        let a = indices[index as usize * 3] as usize;
-        let b = indices[index as usize * 3 + 1] as usize;
-        let c = indices[index as usize * 3 + 2] as usize;
+        let [a, b, c] = triangles_chunked[index as usize];
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         used_vertices +=
             usize::from(used[a] < 0) + usize::from(used[b] < 0) + usize::from(used[c] < 0);
@@ -154,9 +153,8 @@ fn bvh_count_vertices(
 
     // reset used[] for future invocations
     for &index in order {
-        let a = indices[index as usize * 3] as usize;
-        let b = indices[index as usize * 3 + 1] as usize;
-        let c = indices[index as usize * 3 + 2] as usize;
+        let [a, b, c] = triangles_chunked[index as usize];
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         used[a] = -1;
         used[b] = -1;
@@ -642,9 +640,7 @@ pub fn build_meshlets_spatial(
         let index = axes[i] as usize;
         debug_assert!(index < face_count);
 
-        let a = indices[index * 3];
-        let b = indices[index * 3 + 1];
-        let c = indices[index * 3 + 2];
+        let [a, b, c] = indices.as_chunks::<3>().0[index];
 
         // appends triangle to the meshlet and writes previous meshlet to the output if full
         meshlet_offset += append_meshlet(

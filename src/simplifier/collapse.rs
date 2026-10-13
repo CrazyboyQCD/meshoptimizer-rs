@@ -226,15 +226,15 @@ pub(crate) fn pick_edge_collapses(
 
     const NEXT: [usize; 3] = [1, 2, 0];
 
-    for i in (0..index_count).step_by(3) {
+    for corners in &indices.as_chunks::<3>().0[..index_count / 3] {
         // this should never happen as boundEdgeCollapses should give an upper bound for the collapse count, but in an unlikely event it does we can just drop extra collapses
         if collapse_count + 3 > collapse_capacity {
             break;
         }
 
         for e in 0..3 {
-            let i0 = indices[i + e];
-            let i1 = indices[i + NEXT[e]];
+            let i0 = corners[e];
+            let i1 = corners[NEXT[e]];
 
             // this can happen either when input has a zero-length edge, or when we perform collapses for complex
             // topology w/seams and collapse a manifold vertex that connects to both wedges onto one of them

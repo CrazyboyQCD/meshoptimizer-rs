@@ -228,14 +228,11 @@ fn compute_triangle_cones(
     vertex_positions_stride: usize,
 ) -> f32 {
     let vertex_stride_float = vertex_positions_stride / 4;
-    let face_count = indices.len() / 3;
 
     let mut mesh_area = 0.0f32;
 
-    for i in 0..face_count {
-        let a = indices[i * 3] as usize;
-        let b = indices[i * 3 + 1] as usize;
-        let c = indices[i * 3 + 2] as usize;
+    for (i, &[a, b, c]) in indices.as_chunks::<3>().0.iter().enumerate() {
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         let p0 = &vertex_positions[vertex_stride_float * a..];
         let p1 = &vertex_positions[vertex_stride_float * b..];
@@ -531,10 +528,11 @@ fn select_seed_triangle(
     let mut best_live = u32::MAX;
     let mut best_score = f32::MAX;
 
+    let triangles_chunked = indices.as_chunks::<3>().0;
+
     for &index in seeds {
-        let a = indices[index as usize * 3] as usize;
-        let b = indices[index as usize * 3 + 1] as usize;
-        let c = indices[index as usize * 3 + 2] as usize;
+        let [a, b, c] = triangles_chunked[index as usize];
+        let (a, b, c) = (a as usize, b as usize, c as usize);
 
         let live = live_triangles[a] + live_triangles[b] + live_triangles[c];
         let dx = triangles[index as usize].px - cornerx;
@@ -723,9 +721,10 @@ pub fn build_meshlets_flex(
             break;
         }
 
-        let best_extra = i32::from(used[indices[best_triangle as usize * 3] as usize] < 0)
-            + i32::from(used[indices[best_triangle as usize * 3 + 1] as usize] < 0)
-            + i32::from(used[indices[best_triangle as usize * 3 + 2] as usize] < 0);
+        let [bta, btb, btc] = indices.as_chunks::<3>().0[best_triangle as usize];
+        let best_extra = i32::from(used[bta as usize] < 0)
+            + i32::from(used[btb as usize] < 0)
+            + i32::from(used[btc as usize] < 0);
 
         // if the best triangle doesn't fit into current meshlet, we re-select using seeds to maintain global flow
         if split
@@ -769,9 +768,7 @@ pub fn build_meshlets_flex(
             };
         }
 
-        let a = indices[best_triangle as usize * 3];
-        let b = indices[best_triangle as usize * 3 + 1];
-        let c = indices[best_triangle as usize * 3 + 2];
+        let [a, b, c] = indices.as_chunks::<3>().0[best_triangle as usize];
 
         // add meshlet to the output; when the current meshlet is full we reset the accumulated bounds
         if append_meshlet(
@@ -886,11 +883,7 @@ pub fn build_meshlets_scan(
     };
     let mut meshlet_offset = 0usize;
 
-    for i in (0..indices.len()).step_by(3) {
-        let a = indices[i];
-        let b = indices[i + 1];
-        let c = indices[i + 2];
-
+    for &[a, b, c] in indices.as_chunks::<3>().0 {
         // appends triangle to the meshlet and writes previous meshlet to the output if full
         meshlet_offset += append_meshlet(
             &mut meshlet,
