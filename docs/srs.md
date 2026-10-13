@@ -108,7 +108,7 @@ Additional requirements per group:
 | NFR-8 | Toolchain baseline: Rust 2024 edition, MSRV 1.88 (floor for `slice::as_chunks` and the project's modern-API style) | `rust-version` in `Cargo.toml`; gate runs on MSRV |
 | NFR-9 | Documentation and comments in English; every public item references its upstream counterpart | Review criterion |
 | NFR-10 | Source files stay under ~1000 lines; tests are colocated with implementation in `#[cfg(test)]` modules | Review criterion; enforced at module boundaries |
-| NFR-11 | Performance: not a phase-1 gate. Informative target ≤2× upstream compiled with its scalar profile on the reference corpus; SIMD recovery is phase 2 | Deferred benchmark suite |
+| NFR-11 | Performance: informative target ≤2× upstream compiled with its scalar profile ([ADR-0010](adr/0010-scalar-profile-fixtures.md)) on the shared corpus, for both execution time and peak allocation; measured by the bench harness ([ADR-0011](adr/0011-benchmark-methodology.md)). Not a merge gate; SIMD recovery remains future work | `bench/` harness run + gap report (attribution for time >1.5× / memory >1.3×) |
 
 ## 5. Acceptance (verification gates)
 

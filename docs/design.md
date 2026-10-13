@@ -25,6 +25,7 @@
 | Features | `std` (default), `--no-default-features` = `no_std` | backend selection ([ADR-0002](adr/0002-no-std-alloc-baseline.md)) |
 | Dependencies | `libm = "0.2"` only | `no_std` math backend ([ADR-0004](adr/0004-numeric-via-libm.md)) |
 | Dev-dependencies | none planned for phase 1 | fixtures embedded via `include_bytes!` |
+| Bench harness | `bench/` (C++ driver + standalone Rust bin crate) | speed/memory vs upstream scalar profile ([ADR-0011](adr/0011-benchmark-methodology.md)); outside the gate and the workspace |
 | Lints | `[lints]` table in `Cargo.toml` | mechanical enforcement of SRS NFR-1/2 |
 
 ## 3. Crate and module structure
@@ -184,3 +185,22 @@ commit series driven test-first ([TDD](tdd.md) §3/§6):
   `MESHOPTIMIZER_EXPERIMENTAL` to the public API by default and the v1.3 pin froze the contract
   (see SRS §3). `generateNormals`/`remesh` ship flat with experimental-status doc comments.
 - crates.io package name verification happens at publish time ([ADR-0008](adr/0008-licensing.md)).
+
+## 11. Benchmark harness (phase 2)
+
+Methodology, corpus, allocator-counting, and triage rules are specified in
+[ADR-0011](adr/0011-benchmark-methodology.md). Shape of the harness:
+
+```
+bench/
+  cpp/         driver.cpp (upstream compiled in, MESHOPTIMIZER_NO_SIMD) + build.cmd (clang)
+  rust/        standalone bin crate: counting GlobalAlloc + correctness gate + speed/mem modes
+  corpus/      recipes.txt (shape/scale/seed per case) + pins.txt (FNV-1a input/output hashes)
+  results/     JSON per run + summary report (run artifacts)
+```
+
+- Drivers generate inputs from recipes with the shared LCG (`0x12345678`) and verify input hashes
+  against `pins.txt` before measuring; the C++ `gen` mode additionally emits expected outputs to a
+  regenerable scratch directory for the Rust-side correctness gate.
+- Modes: `gen` (C++ only) / `verify` / `speed` (counting off) / `mem` (counting on, no timing
+  claims). Results always embed environment metadata (CPU, clang/rustc versions, opt tier).
