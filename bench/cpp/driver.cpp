@@ -324,6 +324,11 @@ static void make_box(Prep& p, unsigned sub, float extent)
 #define OPT_LEVEL O2
 #endif
 
+// BENCH_SIMD builds (no MESHOPTIMIZER_NO_SIMD) measure upstream's shipped SIMD paths.
+// Filter decode outputs intentionally differ from the scalar pins (rsqrt approximations,
+// ADR-0010), so output pin checks are skipped in this profile; input pins still verify
+// corpus identity and results are informative-only.
+
 struct Op
 {
 	const char* name;
@@ -1167,7 +1172,9 @@ int main(int argc, char** argv)
 				}
 			}
 		}
-		else
+#ifdef BENCH_SIMD
+		// timing-only: SIMD filter outputs differ from the scalar pins by design
+#else
 		{
 			PinMap::const_iterator ot = pins.find(std::string("out|") + op.name);
 			if (ot == pins.end() || ot->second != r.out_hash)
@@ -1176,6 +1183,7 @@ int main(int argc, char** argv)
 				return 1;
 			}
 		}
+#endif
 		results.push_back(r);
 		printf("%-6s %-16s ok\n", mode.c_str(), op.name);
 	}
@@ -1189,8 +1197,14 @@ int main(int argc, char** argv)
 			return 1;
 		}
 		const char* cpu = getenv("PROCESSOR_IDENTIFIER");
-		fprintf(f, "{\"lang\":\"cpp\",\"compiler\":\"%s\",\"opt\":\"%s\",\"mode\":\"%s\",\"cpu\":\"%s\",\"no_simd\":true,\n",
-		    __clang_version__, STR(OPT_LEVEL), mode.c_str(), cpu ? cpu : "unknown");
+		fprintf(f, "{\"lang\":\"cpp\",\"compiler\":\"%s\",\"opt\":\"%s\",\"mode\":\"%s\",\"cpu\":\"%s\",\"no_simd\":%s,\n",
+		    __clang_version__, STR(OPT_LEVEL), mode.c_str(), cpu ? cpu : "unknown",
+#ifdef BENCH_SIMD
+		    "false"
+#else
+		    "true"
+#endif
+		);
 		fprintf(f, "\"results\":[\n");
 		for (size_t i = 0; i < results.size(); ++i)
 		{
