@@ -24,6 +24,7 @@ mod overdrawoptimizer;
 mod partition;
 mod quantization;
 mod rasterizer;
+mod remesher;
 mod simplifier;
 mod spatialorder;
 mod stripifier;
@@ -54,6 +55,7 @@ pub use overdrawoptimizer::optimize_overdraw;
 pub use partition::partition_clusters;
 pub use quantization::{compute_position_exponent, dequantize_half, quantize_float, quantize_half};
 pub use rasterizer::{CoverageStatistics, OverdrawStatistics, analyze_coverage, analyze_overdraw};
+pub use remesher::{REMESH_SHELL, REMESH_SOLVE, remesh};
 pub use simplifier::{
     SIMPLIFY_ERROR_ABSOLUTE, SIMPLIFY_ERROR_CLAMPED, SIMPLIFY_LOCK_BORDER, SIMPLIFY_PERMISSIVE,
     SIMPLIFY_PRESERVE_FOLDS, SIMPLIFY_PRUNE, SIMPLIFY_REGULARIZE, SIMPLIFY_REGULARIZE_LIGHT,

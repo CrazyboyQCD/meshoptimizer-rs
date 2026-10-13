@@ -232,6 +232,14 @@
 //                       data_size bytes data, i32*triangle_count omm_indices,
 //                       u32 next (entries/tails beyond the compacted result
 //                       zero-filled)
+//
+// Remesher command (FR-18). Cube shells exercise interior solidification; the
+// degenerate case (zero extent) produces an empty grid:
+//   rm-remesh       repeat: hdr u32 V, u32 pos_stride, u32 index_count,
+//                           i32 resolution, u32 options
+//                   in: positions V*pos_stride bytes, indices index_count u32
+//                   out: u32 count_bound (NULL destination pass),
+//                       u32 result, f32 result*9 triangle positions
 
 #include "meshoptimizer.h"
 
@@ -4190,6 +4198,113 @@ static void gen_om_compact(FILE* f)
 	}
 }
 
+// --- remesher -------------------------------------------------------------------
+
+// Appends a closed cube surface (8 vertices, 12 triangles) with outward winding;
+// nested calls build multi-shell meshes that exercise interior solidification.
+static void append_cube_mesh(Mesh& m, unsigned stride, float lo, float extent)
+{
+	static const float kCorners[8][3] = {
+	    {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0},
+	    {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1},
+	};
+	static const unsigned kFaces[12][3] = {
+	    {0, 2, 1}, {0, 3, 2}, // z = lo
+	    {4, 5, 6}, {4, 6, 7}, // z = hi
+	    {0, 1, 5}, {0, 5, 4}, // y = lo
+	    {3, 6, 2}, {3, 7, 6}, // y = hi
+	    {0, 4, 7}, {0, 7, 3}, // x = lo
+	    {1, 2, 6}, {1, 6, 5}, // x = hi
+	};
+
+	unsigned base = m.V;
+	m.V += 8;
+	m.has_indices = true;
+	m.vertices.resize(size_t(m.V) * stride, 0);
+
+	for (unsigned i = 0; i < 8; ++i)
+	{
+		float p[3] = {lo + kCorners[i][0] * extent, lo + kCorners[i][1] * extent, lo + kCorners[i][2] * extent};
+		memcpy(&m.vertices[size_t(base + i) * stride], p, 12);
+	}
+
+	for (unsigned i = 0; i < 12; ++i)
+		m.indices.push_back(base + kFaces[i][0]), m.indices.push_back(base + kFaces[i][1]),
+		    m.indices.push_back(base + kFaces[i][2]);
+	m.index_count = unsigned(m.indices.size());
+}
+
+static void gen_rm_remesh(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh; // grid mesh (kind 0)
+		unsigned kind;   // 0 = grid sheet, 1 = cube, 2 = nested cubes, 3 = random, 4 = degenerate
+		unsigned V, T;   // random mesh
+		unsigned pos_stride;
+		int resolution;
+		unsigned options;
+	};
+	static const Cfg kCfgs[] = {
+	    {0, 0, 1, 0, 0, 12, 16, 0},
+	    {0, 0, 1, 0, 0, 12, 24, 2},
+	    {0, 0, 1, 0, 0, 12, 16, 1},
+	    {0, 0, 1, 0, 0, 12, 16, 3},
+	    {8, 8, 0, 0, 0, 12, 32, 2},
+	    {0, 0, 3, 40, 70, 12, 24, 2},
+	    {0, 0, 1, 0, 0, 24, 20, 2},
+	    {0, 0, 2, 0, 0, 12, 20, 0},
+	    {0, 0, 4, 0, 0, 12, 16, 2},
+	    {0, 0, 1, 0, 0, 12, 4, 0},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		if (c.kind == 0)
+			make_grid_mesh(m, c.gw, c.gh, c.pos_stride, 0);
+		else if (c.kind == 1)
+		{
+			m.V = 0;
+			m.index_count = 0;
+			append_cube_mesh(m, c.pos_stride, 0.25f, 0.5f);
+		}
+		else if (c.kind == 2)
+		{
+			m.V = 0;
+			m.index_count = 0;
+			append_cube_mesh(m, c.pos_stride, 0.05f, 0.9f);
+			append_cube_mesh(m, c.pos_stride, 0.3f, 0.4f);
+		}
+		else if (c.kind == 3)
+			make_position_mesh(m, c.V, c.T, c.pos_stride);
+		else
+		{
+			m.V = 0;
+			m.index_count = 0;
+			append_cube_mesh(m, c.pos_stride, 0.5f, 0.f);
+		}
+
+		put_u32(f, m.V);
+		put_u32(f, c.pos_stride);
+		put_u32(f, m.index_count);
+		put_i32(f, c.resolution);
+		put_u32(f, c.options);
+		put_bytes(f, m.vertices.data(), m.vertices.size());
+		put_indices(f, m);
+
+		size_t count_bound = meshopt_remesh(NULL, 0, m.indices.data(), m.index_count,
+		    reinterpret_cast<const float*>(m.vertices.data()), m.V, c.pos_stride, c.resolution, c.options);
+		put_u32(f, unsigned(count_bound));
+
+		std::vector<float> dest(count_bound * 9, 0.f);
+		size_t result = meshopt_remesh(dest.data(), count_bound, m.indices.data(), m.index_count,
+		    reinterpret_cast<const float*>(m.vertices.data()), m.V, c.pos_stride, c.resolution, c.options);
+		put_u32(f, unsigned(result));
+		put_bytes(f, dest.data(), result * 9 * sizeof(float));
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc != 3)
@@ -4362,6 +4477,8 @@ int main(int argc, char** argv)
 		gen = gen_om_measure;
 	else if (strcmp(cmd, "om-compact") == 0)
 		gen = gen_om_compact;
+	else if (strcmp(cmd, "rm-remesh") == 0)
+		gen = gen_rm_remesh;
 
 	if (!gen)
 	{

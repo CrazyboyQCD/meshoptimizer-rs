@@ -24,7 +24,7 @@ if errorlevel 1 (
 )
 
 cd /d "%FIX%"
-cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" "%UP%\src\meshletutils.cpp" "%UP%\src\meshletcodec.cpp" "%UP%\src\clusterizer.cpp" "%UP%\src\simplifier.cpp" "%UP%\src\tangentspace.cpp" "%UP%\src\opacitymap.cpp" /Fe:gen_driver.exe
+cl /nologo /O2 /W4 /DMESHOPTIMIZER_NO_SIMD /I "%UP%\src" gen_driver.cpp "%UP%\src\quantization.cpp" "%UP%\src\indexgenerator.cpp" "%UP%\src\indexanalyzer.cpp" "%UP%\src\vfetchoptimizer.cpp" "%UP%\src\stripifier.cpp" "%UP%\src\vcacheoptimizer.cpp" "%UP%\src\rasterizer.cpp" "%UP%\src\overdrawoptimizer.cpp" "%UP%\src\spatialorder.cpp" "%UP%\src\partition.cpp" "%UP%\src\indexcodec.cpp" "%UP%\src\vertexcodec.cpp" "%UP%\src\vertexfilter.cpp" "%UP%\src\meshletutils.cpp" "%UP%\src\meshletcodec.cpp" "%UP%\src\clusterizer.cpp" "%UP%\src\simplifier.cpp" "%UP%\src\tangentspace.cpp" "%UP%\src\opacitymap.cpp" "%UP%\src\remesher.cpp" /Fe:gen_driver.exe
 if errorlevel 1 exit /b 1
 
 if not exist "%FIX%..\data" mkdir "%FIX%..\data"
@@ -103,5 +103,6 @@ gen_driver.exe om-entrysize "%FIX%..\data\om_entrysize.bin" || exit /b 1
 gen_driver.exe om-rasterize "%FIX%..\data\om_rasterize.bin" || exit /b 1
 gen_driver.exe om-measure "%FIX%..\data\om_measure.bin" || exit /b 1
 gen_driver.exe om-compact "%FIX%..\data\om_compact.bin" || exit /b 1
+gen_driver.exe rm-remesh "%FIX%..\data\rm_remesh.bin" || exit /b 1
 
 echo fixtures regenerated under tests\data\ from upstream at "%UP%"
