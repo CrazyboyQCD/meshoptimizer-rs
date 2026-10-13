@@ -210,6 +210,28 @@
 //                           u32 pos_stride, f32 crease_angle, f32 smoothing
 //                   in: positions V*pos_stride bytes, [indices index_count u32]
 //                   out: normals index_count*3 f32 (xyz per corner)
+//
+// Opacity map commands (FR-15). Textures are procedural (sharp-edged shapes and
+// LCG noise) so all opacity states and the wrap/edge clamp paths are covered;
+// measure meshes inject duplicate index triples to exercise UV dedup:
+//   om-entrysize    repeat: i32 level, i32 states, u32 out
+//   om-rasterize    repeat: hdr i32 level, i32 states, u32 w, u32 h, u32 stride,
+//                           u32 pitch, f32 uv0[2], f32 uv1[2], f32 uv2[2]
+//                   in: texture pitch*h bytes
+//                   out: entry_size(level, states) bytes
+//   om-measure      repeat: hdr u32 V, u32 uvs_stride, u32 index_count, u32 tw,
+//                           u32 th, i32 max_level, f32 target_edge
+//                   in: uvs V*(uvs_stride/4) f32, indices index_count u32
+//                   out: i32*T omm_indices, u32*T sources, u8*T levels, u32 result
+//                       (T = index_count/3; unwritten tails zero-filled)
+//   om-compact      repeat: hdr i32 states, u32 omm_count, u32 data_size,
+//                           u32 triangle_count
+//                   in: u8*omm_count levels, u32*omm_count offsets,
+//                       data_size bytes data, i32*triangle_count omm_indices
+//                   out: u8*omm_count levels, u32*omm_count offsets,
+//                       data_size bytes data, i32*triangle_count omm_indices,
+//                       u32 next (entries/tails beyond the compacted result
+//                       zero-filled)
 
 #include "meshoptimizer.h"
 
@@ -3901,6 +3923,273 @@ static void gen_tan_normals(FILE* f)
 	}
 }
 
+// --- opacity map --------------------------------------------------------------
+
+// Procedural texture: kind 0 is LCG noise, 1 is a sharp circle, 2 vertical bands,
+// 3 a diagonal gradient, 4 constant white. Sharp edges produce mixed opacity
+// states (transparent/opaque/unknown) under rasterization.
+static void make_om_texture(std::vector<unsigned char>& tex, unsigned w, unsigned h, unsigned stride, size_t pitch, unsigned kind)
+{
+	tex.assign(pitch * h, 0);
+
+	if (kind == 0)
+	{
+		for (size_t i = 0; i < tex.size(); ++i)
+			tex[i] = unsigned char(lcg() & 0xff);
+		return;
+	}
+
+	for (unsigned y = 0; y < h; ++y)
+		for (unsigned x = 0; x < w; ++x)
+		{
+			float fx = (float(x) + 0.5f) / float(w) - 0.5f;
+			float fy = (float(y) + 0.5f) / float(h) - 0.5f;
+
+			unsigned char a;
+			if (kind == 1)
+				a = fx * fx + fy * fy < 0.16f ? 255 : 0;
+			else if (kind == 2)
+				a = ((x * 4) / w) & 1 ? 255 : 0;
+			else if (kind == 3)
+				a = unsigned char((x + y) * 255u / unsigned(w + h - 1));
+			else
+				a = 255;
+
+			for (unsigned ch = 0; ch < stride; ++ch)
+				tex[size_t(y) * pitch + size_t(x) * stride + ch] = a;
+		}
+}
+
+static void gen_om_entrysize(FILE* f)
+{
+	for (int level = 0; level <= 12; ++level)
+		for (int states = 2; states <= 4; states += 2)
+		{
+			put_i32(f, level);
+			put_i32(f, states);
+			put_u32(f, unsigned(meshopt_opacityMapEntrySize(level, states)));
+		}
+}
+
+static void gen_om_rasterize(FILE* f)
+{
+	struct Cfg
+	{
+		int level, states;
+		unsigned w, h, stride, pitchpad, kind; // pitch = stride * w + pitchpad
+		float uv[6];
+	};
+	static const Cfg kCfgs[] = {
+	    {0, 2, 64, 64, 1, 0, 1, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {0, 4, 64, 64, 1, 0, 1, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {1, 2, 64, 64, 1, 0, 1, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {1, 4, 64, 64, 1, 0, 2, {0.1f, 0.1f, 0.9f, 0.15f, 0.2f, 0.9f}},
+	    {2, 2, 37, 23, 2, 7, 1, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {2, 4, 64, 64, 4, 3, 0, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {3, 2, 32, 32, 1, 0, 3, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {3, 4, 32, 32, 1, 0, 4, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {2, 2, 64, 64, 1, 0, 1, {-0.3f, -0.3f, 1.7f, 0.f, 0.f, 1.4f}},
+	    {4, 2, 64, 64, 1, 0, 1, {0.25f, 0.25f, 0.26f, 0.25f, 0.25f, 0.26f}},
+	    {4, 4, 64, 64, 3, 5, 2, {0.f, 1.f, 0.f, 0.f, 1.f, 1.f}},
+	    {0, 2, 16, 16, 1, 0, 0, {0.f, 0.f, 0.f, 0.f, 0.f, 0.f}},
+	    {5, 4, 64, 64, 1, 0, 1, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	    {2, 2, 129, 65, 1, 0, 1, {0.f, 0.f, 1.f, 0.f, 0.f, 1.f}},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		size_t pitch = size_t(c.stride) * c.w + c.pitchpad;
+
+		put_i32(f, c.level);
+		put_i32(f, c.states);
+		put_u32(f, c.w);
+		put_u32(f, c.h);
+		put_u32(f, c.stride);
+		put_u32(f, unsigned(pitch));
+		put_bytes(f, c.uv, sizeof(c.uv));
+
+		std::vector<unsigned char> tex;
+		make_om_texture(tex, c.w, c.h, c.stride, pitch, c.kind);
+		put_bytes(f, tex.data(), tex.size());
+
+		std::vector<unsigned char> result(meshopt_opacityMapEntrySize(c.level, c.states), 0);
+		meshopt_opacityMapRasterize(result.data(), c.level, c.states, c.uv, c.uv + 2, c.uv + 4, tex.data(), c.stride, pitch, c.w, c.h);
+		put_bytes(f, result.data(), result.size());
+	}
+}
+
+static void gen_om_measure(FILE* f)
+{
+	struct Cfg
+	{
+		unsigned gw, gh;        // grid mesh (gw == 0: random mesh V/T)
+		unsigned V, T;
+		unsigned stride_floats; // 2 or 4; unused channels get LCG junk
+		unsigned tw, th;
+		int max_level;
+		float target_edge;
+		float dup_ratio; // fraction of triangles re-referencing an earlier triple
+	};
+	static const Cfg kCfgs[] = {
+	    {9, 9, 0, 0, 2, 64, 64, 0, 0.f, 0.f},
+	    {9, 9, 0, 0, 2, 64, 64, 4, 12.f, 0.35f},
+	    {9, 9, 0, 0, 4, 33, 17, 3, 8.f, 0.f},
+	    {0, 0, 40, 90, 2, 48, 48, 5, 4.f, 0.3f},
+	    {5, 5, 0, 0, 2, 16, 16, 0, 0.f, 0.f},
+	    {13, 7, 0, 0, 4, 96, 64, 5, 5.f, 0.5f},
+	};
+
+	for (const Cfg& c : kCfgs)
+	{
+		Mesh m;
+		if (c.gw)
+			make_grid_mesh(m, c.gw, c.gh, 12, 0);
+		else
+			make_position_mesh(m, c.V, c.T, 12);
+
+		unsigned V = m.V;
+		size_t tri_count = m.index_count / 3;
+
+		std::vector<float> uvs(size_t(V) * c.stride_floats, 0.f);
+		for (unsigned i = 0; i < V; ++i)
+		{
+			float u, v;
+			if (c.gw)
+			{
+				u = float(i % c.gw) / float(c.gw - 1);
+				v = float(i / c.gw) / float(c.gh - 1);
+			}
+			else
+			{
+				u = float(lcg() & 0xffff) / 65536.f;
+				v = float(lcg() & 0xffff) / 65536.f;
+			}
+			uvs[size_t(i) * c.stride_floats + 0] = u;
+			uvs[size_t(i) * c.stride_floats + 1] = v;
+			for (unsigned k = 2; k < c.stride_floats; ++k)
+				uvs[size_t(i) * c.stride_floats + k] = float(lcg() & 0xff) / 255.f;
+		}
+
+		if (c.dup_ratio > 0.f)
+		{
+			size_t dups = size_t(float(tri_count) * c.dup_ratio);
+			for (size_t d = 0; d < dups; ++d)
+			{
+				size_t src = (lcg() % unsigned(tri_count - dups)) * 3;
+				m.indices.push_back(m.indices[src + 0]);
+				m.indices.push_back(m.indices[src + 1]);
+				m.indices.push_back(m.indices[src + 2]);
+			}
+			m.index_count = unsigned(m.indices.size());
+		}
+
+		put_u32(f, V);
+		put_u32(f, c.stride_floats * 4);
+		put_u32(f, m.index_count);
+		put_u32(f, c.tw);
+		put_u32(f, c.th);
+		put_i32(f, c.max_level);
+		put_f32(f, c.target_edge);
+		put_bytes(f, uvs.data(), uvs.size() * sizeof(float));
+		put_indices(f, m);
+
+		size_t tc = m.index_count / 3;
+		std::vector<unsigned char> levels(tc, 0);
+		std::vector<unsigned> sources(tc, 0);
+		std::vector<int> omm_indices(tc, 0);
+		size_t result = meshopt_opacityMapMeasure(levels.data(), sources.data(), omm_indices.data(), m.indices.data(), m.index_count,
+		    uvs.data(), V, size_t(c.stride_floats) * 4, c.tw, c.th, c.max_level, c.target_edge);
+		put_bytes(f, omm_indices.data(), tc * sizeof(int));
+		put_bytes(f, sources.data(), tc * sizeof(unsigned));
+		put_bytes(f, levels.data(), tc);
+		put_u32(f, unsigned(result));
+	}
+}
+
+static void gen_om_compact(FILE* f)
+{
+	static const float kTris[][6] = {
+	    {0.f, 0.f, 1.f, 0.f, 0.f, 1.f},
+	    {0.1f, 0.1f, 0.9f, 0.1f, 0.1f, 0.9f},
+	    {0.f, 0.5f, 0.5f, 0.5f, 0.f, 1.f},
+	    {-0.3f, 0.2f, 1.2f, 0.3f, 0.5f, 1.4f},
+	};
+	const size_t distinct = sizeof(kTris) / sizeof(kTris[0]);
+	static const int kLevels[] = {0, 1, 2, 3};
+	static const unsigned char kSpecial2[] = {0x00, 0xff, 0x80};
+	static const unsigned char kSpecial4[] = {0x00, 0xff, 0x3f, 0x55};
+
+	for (int states = 2; states <= 4; states += 2)
+	{
+		unsigned tw = 64, th = 64, tstride = 1;
+		size_t pitch = size_t(tstride) * tw;
+		std::vector<unsigned char> tex;
+		make_om_texture(tex, tw, th, tstride, pitch, 1);
+
+		const unsigned char* sp = states == 2 ? kSpecial2 : kSpecial4;
+		size_t sp_count = states == 2 ? 3 : 4;
+
+		std::vector<unsigned char> levels;
+		std::vector<unsigned> offsets;
+		std::vector<unsigned char> data;
+
+		for (size_t r = 0; r < 2; ++r) // second pass duplicates the first
+			for (size_t i = 0; i < distinct; ++i)
+			{
+				int level = kLevels[i];
+				size_t size = meshopt_opacityMapEntrySize(level, states);
+				levels.push_back((unsigned char)level);
+				offsets.push_back(unsigned(data.size()));
+				data.resize(data.size() + size, 0);
+				meshopt_opacityMapRasterize(data.data() + data.size() - size, level, states, kTris[i], kTris[i] + 2, kTris[i] + 4,
+				    tex.data(), tstride, pitch, tw, th);
+			}
+
+		const size_t pass_count = 2 * distinct;
+		for (size_t i = 0; i < sp_count; ++i) // level-0 special candidates
+		{
+			levels.push_back(0);
+			offsets.push_back(unsigned(data.size()));
+			data.push_back(sp[i]);
+		}
+
+		size_t omm_count = levels.size();
+		size_t data_size = data.size();
+
+		std::vector<int> omm_indices;
+		for (size_t i = 0; i < omm_count * 2; ++i)
+			omm_indices.push_back(int(lcg() % omm_count));
+		omm_indices[0] = int(pass_count + 0);
+		omm_indices[1] = int(pass_count + 1);
+		omm_indices[2] = int(pass_count - 1); // alias of a duplicate
+		omm_indices[3] = 2;
+
+		put_i32(f, states);
+		put_u32(f, unsigned(omm_count));
+		put_u32(f, unsigned(data_size));
+		put_u32(f, unsigned(omm_indices.size()));
+		put_bytes(f, levels.data(), omm_count);
+		put_bytes(f, offsets.data(), omm_count * sizeof(unsigned));
+		put_bytes(f, data.data(), data_size);
+		put_bytes(f, omm_indices.data(), omm_indices.size() * sizeof(int));
+
+		std::vector<int> out_indices = omm_indices;
+		size_t next = meshopt_opacityMapCompact(data.data(), data_size, levels.data(), offsets.data(), omm_count, out_indices.data(),
+		    out_indices.size(), states);
+
+		memset(levels.data() + next, 0, omm_count - next);
+		memset(offsets.data() + next, 0, (omm_count - next) * sizeof(unsigned));
+		size_t end = next ? offsets[next - 1] + meshopt_opacityMapEntrySize(levels[next - 1], states) : 0;
+		memset(data.data() + end, 0, data_size - end);
+
+		put_bytes(f, levels.data(), omm_count);
+		put_bytes(f, offsets.data(), omm_count * sizeof(unsigned));
+		put_bytes(f, data.data(), data_size);
+		put_bytes(f, out_indices.data(), out_indices.size() * sizeof(int));
+		put_u32(f, unsigned(next));
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc != 3)
@@ -4065,6 +4354,14 @@ int main(int argc, char** argv)
 		gen = gen_tan_tangents;
 	else if (strcmp(cmd, "tan-normals") == 0)
 		gen = gen_tan_normals;
+	else if (strcmp(cmd, "om-entrysize") == 0)
+		gen = gen_om_entrysize;
+	else if (strcmp(cmd, "om-rasterize") == 0)
+		gen = gen_om_rasterize;
+	else if (strcmp(cmd, "om-measure") == 0)
+		gen = gen_om_measure;
+	else if (strcmp(cmd, "om-compact") == 0)
+		gen = gen_om_compact;
 
 	if (!gen)
 	{

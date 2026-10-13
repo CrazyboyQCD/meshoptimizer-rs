@@ -19,6 +19,7 @@ mod indexgenerator;
 mod math;
 mod meshletcodec;
 mod meshletutils;
+mod opacitymap;
 mod overdrawoptimizer;
 mod partition;
 mod quantization;
@@ -46,6 +47,9 @@ pub use indexcodec::{
 };
 pub use indexgenerator::*;
 pub use meshletcodec::{decode_meshlet, decode_meshlet_raw, encode_meshlet, encode_meshlet_bound};
+pub use opacitymap::{
+    opacity_map_compact, opacity_map_entry_size, opacity_map_measure, opacity_map_rasterize,
+};
 pub use overdrawoptimizer::optimize_overdraw;
 pub use partition::partition_clusters;
 pub use quantization::{compute_position_exponent, dequantize_half, quantize_float, quantize_half};

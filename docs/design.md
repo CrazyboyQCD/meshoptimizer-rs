@@ -52,7 +52,7 @@ Module tree with upstream provenance and v1.3 size (C++ lines):
 | `stripifier` | stripifier.cpp | 296 | FR-10 | |
 | `indexanalyzer` | indexanalyzer.cpp | 125 | FR-11 | four statistics structs |
 | `simplifier` | simplifier.cpp | 2947 | FR-09 | largest TU; expected to split (§4) |
-| `opacitymap` | opacitymap.cpp | 557 | FR-15 | uses `rasterizer` |
+| `opacitymap` | opacitymap.cpp | 557 | FR-15 | self-contained bilinear texture sampler |
 | `tangentspace` | tangentspace.cpp | 730 | FR-16/18 | |
 | `remesher` | remesher.cpp | 782 | FR-18 | experimental |
 
