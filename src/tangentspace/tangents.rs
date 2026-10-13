@@ -396,6 +396,7 @@ pub fn generate_tangents(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_generateTangents.
     use super::*;
 
     struct Cursor<'a> {

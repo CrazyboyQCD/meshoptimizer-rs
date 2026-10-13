@@ -149,6 +149,9 @@ pub fn compute_position_exponent(minv: &[f32], maxv: &[f32], min_exp: i32, max_b
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_quantizeHalf,
+    // meshopt_quantizeFloat, meshopt_dequantizeHalf,
+    // meshopt_computePositionExponent.
     use super::*;
 
     fn le_u16(b: &[u8]) -> u16 {

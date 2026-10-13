@@ -485,6 +485,8 @@ pub fn optimize_vertex_cache_fifo(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_optimizeVertexCache,
+    // meshopt_optimizeVertexCacheStrip, meshopt_optimizeVertexCacheFifo.
     use super::*;
     use alloc::vec::Vec;
 

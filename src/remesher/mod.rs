@@ -611,6 +611,7 @@ fn solve(voxels: &mut [Voxel], scale: f32, options: u32) {
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_remesh.
     use super::*;
     use alloc::vec::Vec;
 

@@ -315,6 +315,8 @@ pub const fn unstripify_bound(index_count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_stripify, meshopt_stripifyBound,
+    // meshopt_unstripify, meshopt_unstripifyBound.
     use super::*;
     use alloc::vec::Vec;
 

@@ -259,6 +259,8 @@ fn optacos(x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: none (shared vertex hashing / corner
+    // adjacency plumbing; pinned through the tangents and normals fixtures).
     use super::*;
 
     #[test]

@@ -415,6 +415,8 @@ pub fn spatial_cluster_points(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_spatialSortRemap,
+    // meshopt_spatialSortTriangles, meshopt_spatialClusterPoints.
     use super::*;
     use alloc::vec::Vec;
 

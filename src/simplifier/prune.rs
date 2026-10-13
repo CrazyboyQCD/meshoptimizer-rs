@@ -256,6 +256,7 @@ pub fn simplify_prune(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_simplifyPrune.
     use super::*;
     use alloc::vec;
     use alloc::vec::Vec;

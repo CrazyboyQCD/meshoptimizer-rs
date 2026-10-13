@@ -503,7 +503,9 @@ mod tests {
 
     #[test]
     fn hostile_decode_index_buffer() {
+        const _LEN_CHECK: usize = 89984;
         let data = include_bytes!("../../tests/data/ic_hostile_ib.bin");
+        assert_eq!(data.len(), _LEN_CHECK);
         let mut c = Cursor::new(data);
 
         while c.pos < data.len() {
@@ -529,7 +531,9 @@ mod tests {
 
     #[test]
     fn hostile_decode_index_sequence() {
+        const _LEN_CHECK: usize = 43033;
         let data = include_bytes!("../../tests/data/ic_hostile_seq.bin");
+        assert_eq!(data.len(), _LEN_CHECK);
         let mut c = Cursor::new(data);
 
         while c.pos < data.len() {

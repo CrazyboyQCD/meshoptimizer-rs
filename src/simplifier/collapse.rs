@@ -868,6 +868,8 @@ pub(crate) fn fill_fold_quadrics(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: none (internal collapse ranking; pinned
+    // through the simplifier fixtures).
     use super::*;
     use alloc::vec;
 

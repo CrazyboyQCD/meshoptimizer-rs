@@ -710,6 +710,9 @@ fn get_special_index(data: &[u8], level: i32, states: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_opacityMapMeasure,
+    // meshopt_opacityMapRasterize, meshopt_opacityMapEntrySize,
+    // meshopt_opacityMapCompact.
     use super::*;
     use alloc::vec::Vec;
 

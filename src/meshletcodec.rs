@@ -534,6 +534,8 @@ pub fn decode_meshlet_raw(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_encodeMeshlet,
+    // meshopt_encodeMeshletBound, meshopt_decodeMeshlet, meshopt_decodeMeshletRaw.
     use super::*;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -684,7 +686,7 @@ mod tests {
 
     #[test]
     fn golden_decode_meshlet_hostile() {
-        const _LEN_CHECK: usize = 71564;
+        const _LEN_CHECK: usize = 140051;
         let data = include_bytes!("../tests/data/mc_hostile.bin");
         assert_eq!(data.len(), _LEN_CHECK);
         let mut c = Cursor::new(data);

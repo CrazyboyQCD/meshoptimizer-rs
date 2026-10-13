@@ -67,6 +67,8 @@ pub fn optimize_vertex_fetch(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_optimizeVertexFetch,
+    // meshopt_optimizeVertexFetchRemap.
     use super::*;
     use alloc::vec::Vec;
 

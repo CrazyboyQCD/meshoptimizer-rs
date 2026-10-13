@@ -366,6 +366,7 @@ pub fn generate_normals(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_generateNormals.
     use super::*;
 
     struct Cursor<'a> {

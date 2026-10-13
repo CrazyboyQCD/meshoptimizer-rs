@@ -1942,12 +1942,9 @@ static void gen_ic_hostile_ib(FILE* f)
 	{
 		unsigned size = unsigned(b.enc.size());
 
-		// truncations at varied prefix lengths
-		unsigned lengths[] = {0, 1, 2, 17, 18, size / 2, size - 1, size};
-		for (unsigned L : lengths)
+		// truncations at every prefix length
+		for (unsigned L = 0; L <= size; ++L)
 		{
-			if (L > size)
-				continue;
 			std::vector<unsigned char> prefix(b.enc.begin(), b.enc.begin() + L);
 			ic_put_hostile_case(f, prefix, b.index_count, 4, false);
 		}
@@ -1992,11 +1989,9 @@ static void gen_ic_hostile_seq(FILE* f)
 	size_t size = meshopt_encodeIndexSequence(buffer.data(), buffer.size(), base_indices.data(), base_indices.size());
 	std::vector<unsigned char> enc(buffer.begin(), buffer.begin() + size);
 
-	unsigned lengths[] = {0, 1, 2, 4, 5, unsigned(enc.size()) / 2, unsigned(enc.size()) - 1, unsigned(enc.size())};
-	for (unsigned L : lengths)
+	// truncations at every prefix length
+	for (unsigned L = 0; L <= unsigned(enc.size()); ++L)
 	{
-		if (L > enc.size())
-			continue;
 		std::vector<unsigned char> prefix(enc.begin(), enc.begin() + L);
 		ic_put_hostile_case(f, prefix, unsigned(base_indices.size()), 4, true);
 	}
@@ -2193,12 +2188,9 @@ static void gen_vc_hostile(FILE* f)
 	size_t size = vc_encode(buffer, data, 100, 12, 2, 1);
 	unsigned full = unsigned(size);
 
-	// truncations
-	unsigned lengths[] = {0, 1, 2, 24, 25, full / 2, full - 1, full};
-	for (unsigned L : lengths)
+	// truncations at every prefix length
+	for (unsigned L = 0; L <= full; ++L)
 	{
-		if (L > full)
-			continue;
 		std::vector<unsigned char> prefix(buffer.begin(), buffer.begin() + L);
 		vc_put_hostile(f, prefix, 100, 12);
 	}
@@ -2823,9 +2815,8 @@ static void mc_hostile_rounds(FILE* f, const std::vector<unsigned>& vertices, co
 	unsigned vertex_count = unsigned(vertices.size());
 	unsigned triangle_count = unsigned(triangles.size() / 3);
 
-	// truncations
-	unsigned lengths[] = {0, 1, 2, full / 2, full - 1, full};
-	for (unsigned L : lengths)
+	// truncations at every prefix length
+	for (unsigned L = 0; L <= full; ++L)
 	{
 		std::vector<unsigned char> prefix(buffer.begin(), buffer.begin() + L);
 		mc_put_hostile(f, prefix, vertex_count, triangle_count, false);

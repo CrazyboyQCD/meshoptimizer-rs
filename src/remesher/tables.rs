@@ -251,6 +251,9 @@ pub(super) fn build_remesh_tables() -> RemeshTables {
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: none (internal marching-cubes tables;
+    // behavior pinned through the meshopt_remesh fixtures and the invariants
+    // asserted here).
     use super::*;
 
     #[test]

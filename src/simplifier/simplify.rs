@@ -595,6 +595,8 @@ pub(crate) fn simplify_edge(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_simplify,
+    // meshopt_simplifyWithAttributes, meshopt_simplifyWithUpdate.
     use super::*;
     use crate::simplifier::{simplify, simplify_with_attributes, simplify_with_update};
     use alloc::vec;

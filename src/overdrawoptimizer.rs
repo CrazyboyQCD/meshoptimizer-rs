@@ -429,6 +429,7 @@ pub fn optimize_overdraw(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_optimizeOverdraw.
     use super::*;
     use alloc::vec::Vec;
 

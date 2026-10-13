@@ -922,6 +922,14 @@ pub fn generate_provoking_index_buffer(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_generateVertexRemap,
+    // meshopt_generateVertexRemapMulti, meshopt_generateVertexRemapCustom,
+    // meshopt_remapVertexBuffer, meshopt_remapIndexBuffer,
+    // meshopt_filterIndexBuffer, meshopt_filterIndexBufferMulti,
+    // meshopt_generateShadowIndexBuffer, meshopt_generateShadowIndexBufferMulti,
+    // meshopt_generatePositionRemap, meshopt_generateAdjacencyIndexBuffer,
+    // meshopt_generateTessellationIndexBuffer,
+    // meshopt_generateProvokingIndexBuffer.
     use super::*;
 
     struct Cursor<'a> {

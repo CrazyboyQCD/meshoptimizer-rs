@@ -914,6 +914,11 @@ pub fn build_meshlets_scan(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_buildMeshlets,
+    // meshopt_buildMeshletsScan, meshopt_buildMeshletsBound,
+    // meshopt_buildMeshletsFlex, meshopt_buildMeshletsSpatial,
+    // meshopt_optimizeMeshlet, meshopt_optimizeMeshletLevel,
+    // meshopt_extractMeshletIndices.
     use super::super::build_meshlets_spatial;
     use super::super::optimize::{
         extract_meshlet_indices, optimize_meshlet, optimize_meshlet_level,

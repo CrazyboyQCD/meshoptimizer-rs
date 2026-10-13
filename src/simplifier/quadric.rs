@@ -741,6 +741,8 @@ pub(crate) fn fill_attribute_quadrics(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: none (internal quadric algebra; pinned
+    // through the simplifier fixtures).
     use super::*;
     use alloc::vec;
     use alloc::vec::Vec;

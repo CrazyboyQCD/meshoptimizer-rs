@@ -777,6 +777,7 @@ pub fn partition_clusters(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_partitionClusters.
     use super::*;
     use alloc::vec::Vec;
 

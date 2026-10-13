@@ -146,6 +146,8 @@ pub fn compute_sphere_bounds(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_computeClusterBounds,
+    // meshopt_computeMeshletBounds, meshopt_computeSphereBounds.
     use super::*;
     use alloc::vec::Vec;
 

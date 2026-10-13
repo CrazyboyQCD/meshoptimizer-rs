@@ -670,6 +670,8 @@ pub(crate) fn finalize_vertices(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: none (internal adjacency build; pinned
+    // through the simplifier fixtures).
     use super::*;
     use alloc::vec;
 

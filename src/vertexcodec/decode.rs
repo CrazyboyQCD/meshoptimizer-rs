@@ -416,7 +416,9 @@ mod tests {
 
     #[test]
     fn hostile_decode_vertex_buffer() {
+        const _LEN_CHECK: usize = 86773;
         let data = include_bytes!("../../tests/data/vc_hostile.bin");
+        assert_eq!(data.len(), _LEN_CHECK);
         let mut c = Cursor::new(data);
 
         while c.pos < data.len() {

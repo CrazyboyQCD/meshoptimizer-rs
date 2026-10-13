@@ -177,6 +177,8 @@ pub fn analyze_vertex_fetch(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_analyzeVertexCache,
+    // meshopt_analyzeVertexFetch.
     use super::*;
     use alloc::vec::Vec;
 

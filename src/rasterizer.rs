@@ -368,6 +368,9 @@ pub fn analyze_coverage(
 
 #[cfg(test)]
 mod tests {
+    // Upstream entry points covered: meshopt_analyzeOverdraw,
+    // meshopt_analyzeCoverage (FR-11; rasterization order is part of the
+    // contract, so the internal rasterizer is pinned through these).
     use super::*;
     use alloc::vec::Vec;
 
