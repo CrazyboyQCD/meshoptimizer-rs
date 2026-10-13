@@ -347,7 +347,8 @@ impl Prep {
                     let fa = a as f32 / sub as f32 * 2.0 - 1.0;
                     let fb = b as f32 / sub as f32 * 2.0 - 1.0;
                     for k in 0..3usize {
-                        self.pos.push((FACE_N[f][k] + FACE_U[f][k] * fa + FACE_V[f][k] * fb) * h);
+                        self.pos
+                            .push((FACE_N[f][k] + FACE_U[f][k] * fa + FACE_V[f][k] * fb) * h);
                     }
                 }
             }
@@ -373,7 +374,8 @@ struct Op {
 }
 
 fn now_ms() -> f64 {
-    Instant::now().elapsed().as_secs_f64() * 1000.0
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    EPOCH.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
 }
 
 // --- codec ops (tier L) -----------------------------------------------------------
@@ -870,7 +872,16 @@ fn prep_normals(p: &mut Prep) {
 
 fn once_normals(p: &mut Prep) -> f64 {
     let t0 = now_ms();
-    meshopt::generate_normals(&mut p.outf, Some(&p.idx), p.ic, &p.pos, p.v, 12, core::f32::consts::PI, 0.0);
+    meshopt::generate_normals(
+        &mut p.outf,
+        Some(&p.idx),
+        p.ic,
+        &p.pos,
+        p.v,
+        12,
+        core::f32::consts::PI,
+        0.0,
+    );
     now_ms() - t0
 }
 
@@ -907,29 +918,167 @@ fn hash_remesh(p: &mut Prep, h: &mut Fnv, blob: Option<&mut Vec<u8>>) {
 }
 
 static OPS: &[Op] = &[
-    Op { name: "vc_encode", tol: false, prepare: prep_vc_encode, once: once_vc_encode, hash_out: hash_vc_encode },
-    Op { name: "vc_decode", tol: false, prepare: prep_vc_decode, once: once_vc_decode, hash_out: hash_vc_decode },
-    Op { name: "ic_encode", tol: false, prepare: prep_ic_encode, once: once_ic_encode, hash_out: hash_ic_encode },
-    Op { name: "ic_decode", tol: false, prepare: prep_ic_decode, once: once_ic_decode, hash_out: hash_ic_decode },
-    Op { name: "vf_oct", tol: false, prepare: prep_vf_oct, once: once_vf_oct, hash_out: hash_vf_oct },
-    Op { name: "vf_quat", tol: false, prepare: prep_vf_quat, once: once_vf_quat, hash_out: hash_vf_oct },
-    Op { name: "vf_exp", tol: false, prepare: prep_vf_exp, once: once_vf_exp, hash_out: hash_vf_exp },
-    Op { name: "ig_remap", tol: false, prepare: prep_ig_remap, once: once_ig_remap, hash_out: hash_remap },
-    Op { name: "vcache", tol: false, prepare: prep_vcache, once: once_vcache, hash_out: hash_out_i },
-    Op { name: "overdraw", tol: false, prepare: prep_vcache, once: once_overdraw, hash_out: hash_out_i },
-    Op { name: "vfetch", tol: false, prepare: prep_vfetch, once: once_vfetch, hash_out: hash_vfetch },
-    Op { name: "stripify", tol: false, prepare: prep_vcache, once: once_stripify, hash_out: hash_out_i },
-    Op { name: "simplify", tol: false, prepare: prep_simplify, once: once_simplify, hash_out: hash_simplify },
-    Op { name: "simplify_attrs", tol: false, prepare: prep_simplify_attrs, once: once_simplify_attrs, hash_out: hash_simplify },
-    Op { name: "simplify_sloppy", tol: false, prepare: prep_simplify, once: once_simplify_sloppy, hash_out: hash_simplify },
-    Op { name: "prune", tol: false, prepare: prep_prune, once: once_prune, hash_out: hash_out_i },
-    Op { name: "points", tol: false, prepare: prep_points, once: once_points, hash_out: hash_out_i },
-    Op { name: "spatial", tol: false, prepare: prep_ig_remap, once: once_spatial, hash_out: hash_remap },
-    Op { name: "clusterize", tol: false, prepare: prep_clusterize, once: once_clusterize, hash_out: hash_clusterize },
-    Op { name: "partition", tol: false, prepare: prep_partition, once: once_partition, hash_out: hash_partition },
-    Op { name: "tangents", tol: true, prepare: prep_tangents, once: once_tangents, hash_out: hash_out_f },
-    Op { name: "normals", tol: true, prepare: prep_normals, once: once_normals, hash_out: hash_out_f },
-    Op { name: "remesh", tol: true, prepare: prep_remesh, once: once_remesh, hash_out: hash_remesh },
+    Op {
+        name: "vc_encode",
+        tol: false,
+        prepare: prep_vc_encode,
+        once: once_vc_encode,
+        hash_out: hash_vc_encode,
+    },
+    Op {
+        name: "vc_decode",
+        tol: false,
+        prepare: prep_vc_decode,
+        once: once_vc_decode,
+        hash_out: hash_vc_decode,
+    },
+    Op {
+        name: "ic_encode",
+        tol: false,
+        prepare: prep_ic_encode,
+        once: once_ic_encode,
+        hash_out: hash_ic_encode,
+    },
+    Op {
+        name: "ic_decode",
+        tol: false,
+        prepare: prep_ic_decode,
+        once: once_ic_decode,
+        hash_out: hash_ic_decode,
+    },
+    Op {
+        name: "vf_oct",
+        tol: false,
+        prepare: prep_vf_oct,
+        once: once_vf_oct,
+        hash_out: hash_vf_oct,
+    },
+    Op {
+        name: "vf_quat",
+        tol: false,
+        prepare: prep_vf_quat,
+        once: once_vf_quat,
+        hash_out: hash_vf_oct,
+    },
+    Op {
+        name: "vf_exp",
+        tol: false,
+        prepare: prep_vf_exp,
+        once: once_vf_exp,
+        hash_out: hash_vf_exp,
+    },
+    Op {
+        name: "ig_remap",
+        tol: false,
+        prepare: prep_ig_remap,
+        once: once_ig_remap,
+        hash_out: hash_remap,
+    },
+    Op {
+        name: "vcache",
+        tol: false,
+        prepare: prep_vcache,
+        once: once_vcache,
+        hash_out: hash_out_i,
+    },
+    Op {
+        name: "overdraw",
+        tol: false,
+        prepare: prep_vcache,
+        once: once_overdraw,
+        hash_out: hash_out_i,
+    },
+    Op {
+        name: "vfetch",
+        tol: false,
+        prepare: prep_vfetch,
+        once: once_vfetch,
+        hash_out: hash_vfetch,
+    },
+    Op {
+        name: "stripify",
+        tol: false,
+        prepare: prep_vcache,
+        once: once_stripify,
+        hash_out: hash_out_i,
+    },
+    Op {
+        name: "simplify",
+        tol: false,
+        prepare: prep_simplify,
+        once: once_simplify,
+        hash_out: hash_simplify,
+    },
+    Op {
+        name: "simplify_attrs",
+        tol: false,
+        prepare: prep_simplify_attrs,
+        once: once_simplify_attrs,
+        hash_out: hash_simplify,
+    },
+    Op {
+        name: "simplify_sloppy",
+        tol: false,
+        prepare: prep_simplify,
+        once: once_simplify_sloppy,
+        hash_out: hash_simplify,
+    },
+    Op {
+        name: "prune",
+        tol: false,
+        prepare: prep_prune,
+        once: once_prune,
+        hash_out: hash_out_i,
+    },
+    Op {
+        name: "points",
+        tol: false,
+        prepare: prep_points,
+        once: once_points,
+        hash_out: hash_out_i,
+    },
+    Op {
+        name: "spatial",
+        tol: false,
+        prepare: prep_ig_remap,
+        once: once_spatial,
+        hash_out: hash_remap,
+    },
+    Op {
+        name: "clusterize",
+        tol: false,
+        prepare: prep_clusterize,
+        once: once_clusterize,
+        hash_out: hash_clusterize,
+    },
+    Op {
+        name: "partition",
+        tol: false,
+        prepare: prep_partition,
+        once: once_partition,
+        hash_out: hash_partition,
+    },
+    Op {
+        name: "tangents",
+        tol: true,
+        prepare: prep_tangents,
+        once: once_tangents,
+        hash_out: hash_out_f,
+    },
+    Op {
+        name: "normals",
+        tol: true,
+        prepare: prep_normals,
+        once: once_normals,
+        hash_out: hash_out_f,
+    },
+    Op {
+        name: "remesh",
+        tol: true,
+        prepare: prep_remesh,
+        once: once_remesh,
+        hash_out: hash_remesh,
+    },
 ];
 
 fn select_ops(names: &[String]) -> Vec<&'static Op> {
@@ -949,7 +1098,8 @@ fn select_ops(names: &[String]) -> Vec<&'static Op> {
 // --- pins ------------------------------------------------------------------------
 
 fn load_pins(path: &str) -> HashMap<String, u64> {
-    let data = fs::read_to_string(path).unwrap_or_else(|_| die(&format!("cannot load pins: {}", path)));
+    let data =
+        fs::read_to_string(path).unwrap_or_else(|_| die(&format!("cannot load pins: {}", path)));
     let mut pins = HashMap::new();
     for line in data.lines() {
         if line.starts_with('#') || line.is_empty() {
@@ -970,11 +1120,7 @@ fn load_pins(path: &str) -> HashMap<String, u64> {
 
 fn ordered_bits(bits: u32) -> i64 {
     let m = (bits & 0x7fff_ffff) as i64;
-    if bits >> 31 == 1 {
-        -m
-    } else {
-        m
-    }
+    if bits >> 31 == 1 { -m } else { m }
 }
 
 fn f32_close(a: u32, b: u32) -> bool {
@@ -1014,10 +1160,7 @@ fn compare_blob(expected: &[u8], actual: &[u8], op: &str) {
         if !f32_close(a, b) {
             die(&format!(
                 "op {}: blob word mismatch at offset {}: {:08x} vs {:08x}",
-                op,
-                off,
-                a,
-                b
+                op, off, a, b
             ));
         }
     }
@@ -1057,7 +1200,10 @@ fn write_results(path: &str, mode: &str, opt: &str, results: &[Result]) {
     let _ = writeln!(
         s,
         "{{\"lang\":\"rust\",\"compiler\":\"{}\",\"opt\":\"{}\",\"mode\":\"{}\",\"cpu\":\"{}\",\"no_simd\":true,",
-        rustc.replace('"', ""), opt, mode, cpu
+        rustc.replace('"', ""),
+        opt,
+        mode,
+        cpu
     );
     let _ = writeln!(s, "\"results\":[");
     for (i, r) in results.iter().enumerate() {
@@ -1135,7 +1281,10 @@ fn main() {
 
         match pins.get(&format!("in|{}", op.name)) {
             Some(&h) if h == p.in_hash => {}
-            _ => die(&format!("input pin mismatch for {} (corpus diverged)", op.name)),
+            _ => die(&format!(
+                "input pin mismatch for {} (corpus diverged)",
+                op.name
+            )),
         }
 
         let mut blob: Vec<u8> = Vec::new();
