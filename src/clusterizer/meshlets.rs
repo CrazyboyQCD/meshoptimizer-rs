@@ -364,16 +364,22 @@ fn get_neighbor_triangle(
     let mut best_priority = 5;
     let mut best_score = f32::MAX;
 
-    for i in 0..meshlet.vertex_count as usize {
-        let index = meshlet_vertices[meshlet.vertex_offset as usize + i] as usize;
+    // hoisted bounds checks: triangle indices as fixed chunks (1 check per triangle
+    // instead of 3), meshlet vertices sliced once per meshlet
+    let triangles_chunked = indices.as_chunks::<3>().0;
+    let meshlet_vs = &meshlet_vertices[meshlet.vertex_offset as usize
+        ..meshlet.vertex_offset as usize + meshlet.vertex_count as usize];
 
-        let neighbors = &adjacency.data[adjacency.offsets[index] as usize..];
-        let neighbors_size = adjacency.counts[index] as usize;
+    for &index in meshlet_vs {
+        let index = index as usize;
 
-        for &triangle in &neighbors[..neighbors_size] {
-            let a = indices[triangle as usize * 3] as usize;
-            let b = indices[triangle as usize * 3 + 1] as usize;
-            let c = indices[triangle as usize * 3 + 2] as usize;
+        let noff = adjacency.offsets[index] as usize;
+        let nsize = adjacency.counts[index] as usize;
+        let neighbors = &adjacency.data[noff..noff + nsize];
+
+        for &triangle in neighbors {
+            let [a, b, c] = triangles_chunked[triangle as usize];
+            let (a, b, c) = (a as usize, b as usize, c as usize);
 
             let extra = i32::from(used[a] < 0) + i32::from(used[b] < 0) + i32::from(used[c] < 0);
 
@@ -442,20 +448,24 @@ fn append_seed_triangles(
     let mut best_live = [u32::MAX; MESHLET_ADD_SEEDS];
     let mut best_score = [f32::MAX; MESHLET_ADD_SEEDS];
 
-    for i in 0..meshlet.vertex_count as usize {
-        let index = meshlet_vertices[meshlet.vertex_offset as usize + i] as usize;
+    let triangles_chunked = indices.as_chunks::<3>().0;
+    let meshlet_vs = &meshlet_vertices[meshlet.vertex_offset as usize
+        ..meshlet.vertex_offset as usize + meshlet.vertex_count as usize];
+
+    for &index in meshlet_vs {
+        let index = index as usize;
 
         let mut best_neighbor = u32::MAX;
         let mut best_neighbor_live = u32::MAX;
 
         // find the neighbor with the smallest live metric
-        let neighbors = &adjacency.data[adjacency.offsets[index] as usize..];
-        let neighbors_size = adjacency.counts[index] as usize;
+        let noff = adjacency.offsets[index] as usize;
+        let nsize = adjacency.counts[index] as usize;
+        let neighbors = &adjacency.data[noff..noff + nsize];
 
-        for &triangle in &neighbors[..neighbors_size] {
-            let a = indices[triangle as usize * 3] as usize;
-            let b = indices[triangle as usize * 3 + 1] as usize;
-            let c = indices[triangle as usize * 3 + 2] as usize;
+        for &triangle in neighbors {
+            let [a, b, c] = triangles_chunked[triangle as usize];
+            let (a, b, c) = (a as usize, b as usize, c as usize);
 
             let live = live_triangles[a] + live_triangles[b] + live_triangles[c];
 
