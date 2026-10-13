@@ -1,0 +1,21 @@
+[package]
+name = "bench-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rust-side benchmark driver for the speed/memory comparison (ADR-0011); standalone, not part of the library workspace"
+
+[dependencies]
+meshoptimizer-rs = { path = "../.." }
+
+[[bin]]
+name = "bench_rs"
+path = "src/main.rs"
+
+# Primary comparison tier (clang -O2 counterpart, ADR-0011).
+[profile.release]
+opt-level = 2
+
+# Secondary robustness tier (clang -O3 counterpart): cargo build --profile o3
+[profile.o3]
+inherits = "release"
+opt-level = 3

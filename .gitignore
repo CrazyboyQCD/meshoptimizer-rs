@@ -3,3 +3,5 @@ tests/fixtures/gen_driver.exe
 tests/fixtures/*.obj
 bench/cpp/*.exe
 bench/results/
+bench/rust/target
+bench/rust/Cargo.lock
