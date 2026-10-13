@@ -99,7 +99,7 @@ Additional requirements per group:
 | ID | Requirement | Verification |
 |----|-------------|--------------|
 | NFR-1 | `no_std` + `alloc` code paths when built with `--no-default-features` ([ADR-0002](adr/0002-no-std-alloc-baseline.md)) | `cargo clippy --no-default-features --all-targets -- -D warnings` (host build; the crate attribute turns any `std` usage into a compile error) |
-| NFR-2 | 100% safe: `unsafe` forbidden crate-wide; no `panic!`/`unwrap`/`expect`/`todo!`/`unimplemented!`/`unreachable!` in library code ([ADR-0003](adr/0003-forbid-unsafe-deny-panic.md)) | `[lints]` table in `Cargo.toml` + `-D warnings` clippy gate |
+| NFR-2 | 100% safe in every default configuration: `unsafe` forbidden crate-wide (opt-in `simd` feature scopes it to the vertex-decode kernels, [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md)); no `panic!`/`unwrap`/`expect`/`todo!`/`unimplemented!`/`unreachable!` in library code ([ADR-0003](adr/0003-forbid-unsafe-deny-panic.md)) | `[lints]` table in `Cargo.toml` + `-D warnings` clippy gate (`forbid` active without the `simd` feature) |
 | NFR-3 | Decoders never panic on arbitrary (including malformed) input; they return failure indicators | Code-review criterion per decode function; fuzz targets (stretch goal) |
 | NFR-4 | Deterministic: identical inputs produce identical outputs on every platform, every run | Encoders byte-compared against golden fixtures on CI; no floating-point environment flags are touched |
 | NFR-5 | Wire-format compatibility: every stream produced by upstream v1.3 decoders decodes here, and every stream produced here decodes upstream; encoders are byte-exact vs upstream | Golden fixtures ([ADR-0007](adr/0007-golden-vectors.md)) |
@@ -125,9 +125,12 @@ The commands are run exactly as written (same feature/target selection) — see 
 
 ## 6. Out of scope (phase 1)
 
-1. **SIMD paths** — upstream's SSE/AVX/NEON vertex-codec and filter kernels. Phase 1 is fully
-   scalar; wire formats are identical, so SIMD can be added later behind runtime detection
-   without API change (phase 2 candidate).
+1. **SIMD paths** — upstream's SSE/AVX vertex-codec decode kernels are recovered behind the
+   opt-in, off-by-default `simd` feature (x86_64, implies `std`), scoped per
+   [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md); the scalar kernels remain the default
+   and the behavioral reference. Vertex-filter SIMD variants are permanently out of scope —
+   they are not output-identical to the scalar kernels ([ADR-0010](adr/0010-scalar-profile-fixtures.md)).
+   Non-x86_64 and `no_std` targets always get the scalar kernels.
 2. **Allocator customization** — `setAllocator`/`setAllocatorCache`; Rust's global allocator
    covers the use case.
 3. **`std`-only conveniences** — the default `std` feature selects only the math backend
