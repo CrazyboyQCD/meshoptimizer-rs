@@ -40,7 +40,6 @@ struct TriangleAdjacency {
 
 fn build_triangle_adjacency(indices: &[u32], vertex_count: usize) -> TriangleAdjacency {
     let index_count = indices.len();
-    let face_count = index_count / 3;
 
     let mut counts = vec![0u32; vertex_count];
     let mut offsets = vec![0u32; vertex_count];
@@ -52,30 +51,28 @@ fn build_triangle_adjacency(indices: &[u32], vertex_count: usize) -> TriangleAdj
     }
 
     let mut offset = 0u32;
-    for i in 0..vertex_count {
-        offsets[i] = offset;
-        offset += counts[i];
+    for (o, &c) in offsets.iter_mut().zip(counts.iter()) {
+        *o = offset;
+        offset += c;
     }
 
     debug_assert!(offset as usize == index_count);
 
-    for face in 0..face_count {
-        let a = indices[face * 3];
-        let b = indices[face * 3 + 1];
-        let c = indices[face * 3 + 2];
+    for (face, &[a, b, c]) in indices.as_chunks::<3>().0.iter().enumerate() {
+        let face = face as u32;
 
-        data[offsets[a as usize] as usize] = face as u32;
+        data[offsets[a as usize] as usize] = face;
         offsets[a as usize] += 1;
-        data[offsets[b as usize] as usize] = face as u32;
+        data[offsets[b as usize] as usize] = face;
         offsets[b as usize] += 1;
-        data[offsets[c as usize] as usize] = face as u32;
+        data[offsets[c as usize] as usize] = face;
         offsets[c as usize] += 1;
     }
 
     // fix offsets that have been disturbed by the previous pass
-    for i in 0..vertex_count {
-        debug_assert!(offsets[i] >= counts[i]);
-        offsets[i] -= counts[i];
+    for (o, &c) in offsets.iter_mut().zip(counts.iter()) {
+        debug_assert!(*o >= c);
+        *o -= c;
     }
 
     TriangleAdjacency {
@@ -189,6 +186,9 @@ fn optimize_vertex_cache_table(
 
     let face_count = index_count / 3;
 
+    // bounds-check reduction: triangle corners as fixed chunks (1 check instead of 3)
+    let triangles_chunked = indices.as_chunks::<3>().0;
+
     // build adjacency information; live triangle counts alias the counts array since
     // triangles are removed from adjacency as they are emitted
     let TriangleAdjacency {
@@ -203,18 +203,14 @@ fn optimize_vertex_cache_table(
     // compute initial vertex scores
     let mut vertex_scores = vec![0f32; vertex_count];
 
-    for i in 0..vertex_count {
-        vertex_scores[i] = vertex_score(table, -1, live_triangles[i]);
+    for (score, &live) in vertex_scores.iter_mut().zip(live_triangles.iter()) {
+        *score = vertex_score(table, -1, live);
     }
 
     // compute triangle scores
     let mut triangle_scores = vec![0f32; face_count];
 
-    for i in 0..face_count {
-        let a = indices[i * 3];
-        let b = indices[i * 3 + 1];
-        let c = indices[i * 3 + 2];
-
+    for (i, &[a, b, c]) in triangles_chunked.iter().enumerate() {
         triangle_scores[i] =
             vertex_scores[a as usize] + vertex_scores[b as usize] + vertex_scores[c as usize];
     }
@@ -233,9 +229,7 @@ fn optimize_vertex_cache_table(
     while current_triangle != !0u32 {
         debug_assert!(output_triangle < face_count);
 
-        let a = indices[current_triangle as usize * 3];
-        let b = indices[current_triangle as usize * 3 + 1];
-        let c = indices[current_triangle as usize * 3 + 2];
+        let [a, b, c] = triangles_chunked[current_triangle as usize];
 
         // output indices
         destination[output_triangle * 3] = a;
@@ -268,8 +262,8 @@ fn optimize_vertex_cache_table(
         // remove emitted triangle from adjacency data
         // this makes sure that we spend less time traversing these lists on subsequent
         // iterations; live triangle counts are updated as a byproduct of these adjustments
-        for k in 0..3 {
-            let index = indices[current_triangle as usize * 3 + k] as usize;
+        for &index in &[a, b, c] {
+            let index = index as usize;
 
             let neighbors_begin = offsets[index] as usize;
             let neighbors_size = live_triangles[index] as usize;

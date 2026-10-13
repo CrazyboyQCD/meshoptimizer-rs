@@ -48,8 +48,6 @@ struct TriangleAdjacency {
 }
 
 fn build_triangle_adjacency(indices: &[u32], vertex_count: usize) -> TriangleAdjacency {
-    let face_count = indices.len() / 3;
-
     let mut counts = alloc::vec![0u32; vertex_count];
     let mut offsets = alloc::vec![0u32; vertex_count];
     let mut data = alloc::vec![0u32; indices.len()];
@@ -62,31 +60,30 @@ fn build_triangle_adjacency(indices: &[u32], vertex_count: usize) -> TriangleAdj
     // fill offset table
     let mut offset = 0u32;
 
-    for i in 0..vertex_count {
-        offsets[i] = offset;
-        offset += counts[i];
+    for (o, &c) in offsets.iter_mut().zip(counts.iter()) {
+        *o = offset;
+        offset += c;
     }
 
     debug_assert!(offset as usize == indices.len());
 
     // fill triangle data
-    for f in 0..face_count {
-        let a = indices[f * 3] as usize;
-        let b = indices[f * 3 + 1] as usize;
-        let c = indices[f * 3 + 2] as usize;
+    for (f, &[a, b, c]) in indices.as_chunks::<3>().0.iter().enumerate() {
+        let (a, b, c) = (a as usize, b as usize, c as usize);
+        let f = f as u32;
 
-        data[offsets[a] as usize] = f as u32;
+        data[offsets[a] as usize] = f;
         offsets[a] += 1;
-        data[offsets[b] as usize] = f as u32;
+        data[offsets[b] as usize] = f;
         offsets[b] += 1;
-        data[offsets[c] as usize] = f as u32;
+        data[offsets[c] as usize] = f;
         offsets[c] += 1;
     }
 
     // fix offsets that have been disturbed by the previous pass
-    for i in 0..vertex_count {
-        debug_assert!(offsets[i] >= counts[i]);
-        offsets[i] -= counts[i];
+    for (o, &c) in offsets.iter_mut().zip(counts.iter()) {
+        debug_assert!(*o >= c);
+        *o -= c;
     }
 
     TriangleAdjacency {
@@ -97,8 +94,6 @@ fn build_triangle_adjacency(indices: &[u32], vertex_count: usize) -> TriangleAdj
 }
 
 fn build_triangle_adjacency_sparse(indices: &[u32], vertex_count: usize) -> TriangleAdjacency {
-    let face_count = indices.len() / 3;
-
     // sparse mode can build adjacency more quickly by ignoring unused vertices, using a bit to mark visited vertices
     const SPARSE_SEEN: u32 = 1 << 31;
     debug_assert!(indices.len() < SPARSE_SEEN as usize);
@@ -128,16 +123,15 @@ fn build_triangle_adjacency_sparse(indices: &[u32], vertex_count: usize) -> Tria
     debug_assert!(offset as usize == indices.len());
 
     // fill triangle data
-    for f in 0..face_count {
-        let a = indices[f * 3] as usize;
-        let b = indices[f * 3 + 1] as usize;
-        let c = indices[f * 3 + 2] as usize;
+    for (f, &[a, b, c]) in indices.as_chunks::<3>().0.iter().enumerate() {
+        let (a, b, c) = (a as usize, b as usize, c as usize);
+        let f = f as u32;
 
-        data[offsets[a] as usize] = f as u32;
+        data[offsets[a] as usize] = f;
         offsets[a] += 1;
-        data[offsets[b] as usize] = f as u32;
+        data[offsets[b] as usize] = f;
         offsets[b] += 1;
-        data[offsets[c] as usize] = f as u32;
+        data[offsets[c] as usize] = f;
         offsets[c] += 1;
     }
 
