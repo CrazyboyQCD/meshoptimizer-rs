@@ -31,9 +31,9 @@ pub(crate) fn compute_vertex_ids(
     for i in 0..vertex_count {
         let v = &vertex_positions[i];
 
-        let xi = cast_i32(v.x * cell_scale + 0.5);
-        let yi = cast_i32(v.y * cell_scale + 0.5);
-        let zi = cast_i32(v.z * cell_scale + 0.5);
+        let xi = (v.x * cell_scale + 0.5) as i32;
+        let yi = (v.y * cell_scale + 0.5) as i32;
+        let zi = (v.z * cell_scale + 0.5) as i32;
 
         if vertex_lock.is_some_and(|l| l[i] & SIMPLIFY_VERTEX_LOCK != 0) {
             vertex_ids[i] = (1 << 30) | i as u32;
@@ -612,6 +612,22 @@ mod tests {
         compute_vertex_ids(&mut ids, &positions, Some(&lock), 3, 5);
         assert_eq!(ids[0], (1 << 30) | 0);
         assert_eq!(ids[1], (4 << 20) | (2 << 10) | 1);
+    }
+
+    #[test]
+    fn vertex_ids_saturate_on_non_finite_positions() {
+        // ADR-0013: the hot-path `as` casts pin Rust saturating semantics inside
+        // upstream's int(float) UB window (x86 cvttss2si would yield INT_MIN instead).
+        let positions = vec![
+            v3(f32::NAN, f32::INFINITY, f32::NEG_INFINITY),
+            v3(0.0, 0.5, 1.0),
+        ];
+        let mut ids = vec![0u32; 2];
+
+        compute_vertex_ids(&mut ids, &positions, None, 2, 5);
+        // NaN -> 0; +-inf -> i32::MAX/i32::MIN; packing drops the shifted-out bits
+        assert_eq!(ids[0], ((i32::MAX << 10) | i32::MIN) as u32);
+        assert_eq!(ids[1], (0 << 20) | (2 << 10) | 4);
     }
 
     #[test]

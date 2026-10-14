@@ -352,9 +352,9 @@ fn voxelize(
                 let pz = sz + su * ez + sv * fz;
 
                 // compute coordinates with an extra bit to use in octant mask
-                let hx = cast_i32(px * (scale * 2.0));
-                let hy = cast_i32(py * (scale * 2.0));
-                let hz = cast_i32(pz * (scale * 2.0));
+                let hx = (px * (scale * 2.0)) as i32;
+                let hy = (py * (scale * 2.0)) as i32;
+                let hz = (pz * (scale * 2.0)) as i32;
                 let mut x = hx >> 1;
                 let mut y = hy >> 1;
                 let mut z = hz >> 1;
@@ -612,6 +612,35 @@ mod tests {
     // Upstream entry points covered: meshopt_remesh.
     use super::*;
     use alloc::vec::Vec;
+
+    #[test]
+    fn voxelize_non_finite_positions_saturate_to_origin_voxel() {
+        // ADR-0013: NaN coordinates saturate to 0 and tag the (0,0,0) grid cell;
+        // upstream x86 (cvttss2si -> INT_MIN) would clamp them into the cutoff
+        // voxel instead — C int(NaN) is UB, this pins the port's contract.
+        let resolution = 8;
+        let res = resolution as usize;
+        let mut grid = vec![0u8; res * res * res];
+
+        let positions = [f32::NAN, f32::NAN, f32::NAN, 0.25, 0.0, 0.0, 0.0, 0.25, 0.0];
+
+        voxelize(
+            &mut grid,
+            &[],
+            None,
+            &[0, 1, 2],
+            &positions,
+            12,
+            resolution,
+            1.0,
+            &[0.0; 3],
+            0,
+        );
+
+        // idx = (x + 1) + res * ((y + 1) + res * (z + 1)) = 1 + 8 * 9 = 73
+        assert_eq!(grid[73], 1);
+        assert_eq!(grid.iter().sum::<u8>(), 1);
+    }
 
     struct Cursor<'a> {
         data: &'a [u8],
