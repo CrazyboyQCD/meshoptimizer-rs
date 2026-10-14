@@ -8,10 +8,12 @@
 //! `docs/tdd.md` for the test-driven process, and `docs/adr/` for decision records.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// ADR-0012: unsafe is machine-forbidden in every default build; the `simd` feature
-// scopes it to the vertex-decode kernel module (the sole `#[allow(unsafe_code)]`).
-#![cfg_attr(not(feature = "simd"), forbid(unsafe_code))]
-#![cfg_attr(feature = "simd", deny(unsafe_code))]
+// ADR-0003/0012/0014: `unsafe_code` is denied crate-wide; every allowance is an
+// explicit, audited site carrying a SAFETY comment. Inventory (ADR-0014):
+// - `simplifier::sloppy::compute_vertex_ids` (plain float->int truncation,
+//   soundness argued from the rescale value range)
+// - `vertexcodec::decode_simd` (SIMD decode kernel, `simd` feature only)
+#![deny(unsafe_code)]
 
 extern crate alloc;
 

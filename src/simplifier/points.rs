@@ -129,6 +129,10 @@ fn fill_cell_remap_reservoir(
 /// Upstream: `meshopt_simplifyPoints`. Clusters points on a uniform grid and
 /// picks a representative per cell; `vertex_colors`/`color_weight` steer the
 /// representative choice.
+///
+/// `vertex_positions` must be finite; NaN or infinite coordinates are outside
+/// the API contract, where upstream C is undefined behavior as well
+/// (ADR-0014).
 // port-shape: mirrors the upstream parameter list (ADR-0005)
 #[allow(clippy::too_many_arguments)]
 pub fn simplify_points(

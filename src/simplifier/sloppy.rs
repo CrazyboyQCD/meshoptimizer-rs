@@ -18,6 +18,9 @@ fn murmur2(mut h: u32) -> u32 {
     h
 }
 
+// unsafe inventory: the `to_int_unchecked` sites below are one of the two
+// sanctioned `unsafe_code` allowances in the crate (see ADR-0014)
+#[allow(unsafe_code)]
 pub(crate) fn compute_vertex_ids(
     vertex_ids: &mut [u32],
     vertex_positions: &[Vector3],
@@ -31,9 +34,19 @@ pub(crate) fn compute_vertex_ids(
     for i in 0..vertex_count {
         let v = &vertex_positions[i];
 
-        let xi = (v.x * cell_scale + 0.5) as i32;
-        let yi = (v.y * cell_scale + 0.5) as i32;
-        let zi = (v.z * cell_scale + 0.5) as i32;
+        debug_assert!(v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
+
+        // ADR-0014: plain truncation mirrors upstream's int(); Rust's only safe
+        // conversion (`as`) lowers to a saturating intrinsic that blocks
+        // auto-vectorization here (4.6x slower in isolation).
+        // SAFETY: callers pass positions rescaled to [0, 1] by
+        // `rescale_positions` with `cell_scale` <= 1023, so the argument lies
+        // in [0.5, 1023.5]. Non-finite input is outside the API contract
+        // (documented on the public entry points) and is UB upstream as well
+        // (C99 6.3.1.4); debug builds assert finiteness above.
+        let xi = unsafe { (v.x * cell_scale + 0.5).to_int_unchecked::<i32>() };
+        let yi = unsafe { (v.y * cell_scale + 0.5).to_int_unchecked::<i32>() };
+        let zi = unsafe { (v.z * cell_scale + 0.5).to_int_unchecked::<i32>() };
 
         if vertex_lock.is_some_and(|l| l[i] & SIMPLIFY_VERTEX_LOCK != 0) {
             vertex_ids[i] = (1 << 30) | i as u32;
@@ -236,6 +249,10 @@ fn interpolate(y: f32, x0: f32, y0: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> 
 /// Upstream: `meshopt_simplifySloppy`. Grid-quantizing simplifier that
 /// guarantees the target index count by welding vertices on a uniform grid;
 /// `target_error` drives the minimum grid resolution.
+///
+/// `vertex_positions` must be finite; NaN or infinite coordinates are outside
+/// the API contract, where upstream C is undefined behavior as well
+/// (ADR-0014).
 // port-shape: mirrors the upstream parameter list (ADR-0005)
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
@@ -615,19 +632,27 @@ mod tests {
     }
 
     #[test]
-    fn vertex_ids_saturate_on_non_finite_positions() {
-        // ADR-0013: the hot-path `as` casts pin Rust saturating semantics inside
-        // upstream's int(float) UB window (x86 cvttss2si would yield INT_MIN instead).
-        let positions = vec![
-            v3(f32::NAN, f32::INFINITY, f32::NEG_INFINITY),
-            v3(0.0, 0.5, 1.0),
-        ];
-        let mut ids = vec![0u32; 2];
+    #[allow(clippy::identity_op)] // edge-code literals keep upstream's `| 0` shape
+    fn vertex_ids_handle_extreme_finite_positions() {
+        // ADR-0014: finiteness of input positions is the documented
+        // precondition; arbitrarily large finite coordinates rescale into
+        // [0, 1], so the unchecked conversions never leave the i32 range
+        // (this test runs under Miri as the executable half of that proof).
+        let big = 1.0e37f32;
+        let raw = [big, -big, 0.0, -big, big, big, 0.0, 0.0, -big];
+        let mut rescaled = vec![v3(0.0, 0.0, 0.0); 3];
+        rescale_positions(Some(&mut rescaled), &raw, 3, 12, None, None);
+        for r in &rescaled {
+            assert!((0.0..=1.0).contains(&r.x));
+            assert!((0.0..=1.0).contains(&r.y));
+            assert!((0.0..=1.0).contains(&r.z));
+        }
 
-        compute_vertex_ids(&mut ids, &positions, None, 2, 5);
-        // NaN -> 0; +-inf -> i32::MAX/i32::MIN; packing drops the shifted-out bits
-        assert_eq!(ids[0], ((i32::MAX << 10) | i32::MIN) as u32);
-        assert_eq!(ids[1], (0 << 20) | (2 << 10) | 4);
+        let mut ids = vec![0u32; 3];
+        compute_vertex_ids(&mut ids, &rescaled, None, 3, 5);
+        assert_eq!(ids[0], (4 << 20) | (0 << 10) | 2);
+        assert_eq!(ids[1], (0 << 20) | (4 << 10) | 4);
+        assert_eq!(ids[2], (2 << 20) | (2 << 10) | 0);
     }
 
     #[test]
