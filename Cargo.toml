@@ -2,7 +2,7 @@
 name = "meshoptimizer-rs"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "Safe, no_std-capable Rust port of meshoptimizer: mesh processing algorithms that make meshes ready for GPU consumption"
 license = "MIT OR Apache-2.0"
 categories = ["graphics", "encoding", "no-std"]
@@ -12,12 +12,17 @@ keywords = ["mesh", "gltf", "graphics", "no_std", "compression"]
 default = ["std"]
 # Uses the platform standard library for math; disable for no_std builds (libm backend).
 std = []
+# Opt-in SIMD vertex-decode kernels (ADR-0012): x86_64 only, no-op elsewhere.
+# Compile-time dispatch, no runtime detection: `simd` assumes the target has
+# SSSE3+POPCNT (as upstream compiled with -mssse3 -mpopcnt); running on an
+# older CPU faults. `simd-avx512` swaps in the AVX512-VBMI2 kernel (upstream's
+# SIMD_AVX compile gate) and must only run on AVX512 hardware. Pure core, so
+# no_std builds can enable it.
+simd = []
+simd-avx512 = ["simd"]
 
 [dependencies]
 libm = "0.2"
-
-[lints.rust]
-unsafe_code = "forbid"
 
 [lints.clippy]
 std_instead_of_core = "warn"

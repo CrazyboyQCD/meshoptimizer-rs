@@ -99,16 +99,16 @@ Additional requirements per group:
 | ID | Requirement | Verification |
 |----|-------------|--------------|
 | NFR-1 | `no_std` + `alloc` code paths when built with `--no-default-features` ([ADR-0002](adr/0002-no-std-alloc-baseline.md)) | `cargo clippy --no-default-features --all-targets -- -D warnings` (host build; the crate attribute turns any `std` usage into a compile error) |
-| NFR-2 | 100% safe in every default configuration: `unsafe` forbidden crate-wide (opt-in `simd` feature scopes it to the vertex-decode kernels, [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md)); no `panic!`/`unwrap`/`expect`/`todo!`/`unimplemented!`/`unreachable!` in library code ([ADR-0003](adr/0003-forbid-unsafe-deny-panic.md)) | `[lints]` table in `Cargo.toml` + `-D warnings` clippy gate (`forbid` active without the `simd` feature) |
+| NFR-2 | 100% safe in every default configuration: `unsafe` forbidden crate-wide (opt-in `simd` feature scopes it to the vertex-decode kernels, [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md)); no `panic!`/`unwrap`/`expect`/`todo!`/`unimplemented!`/`unreachable!` in library code ([ADR-0003](adr/0003-forbid-unsafe-deny-panic.md)) | `lib.rs` `cfg_attr` lint gate (`forbid` without `simd`, `deny` with a module-scoped `allow` on the kernel module) + `-D warnings` clippy gate |
 | NFR-3 | Decoders never panic on arbitrary (including malformed) input; they return failure indicators | Code-review criterion per decode function; fuzz targets (stretch goal) |
 | NFR-4 | Deterministic: identical inputs produce identical outputs on every platform, every run | Encoders byte-compared against golden fixtures on CI; no floating-point environment flags are touched |
 | NFR-5 | Wire-format compatibility: every stream produced by upstream v1.3 decoders decodes here, and every stream produced here decodes upstream; encoders are byte-exact vs upstream | Golden fixtures ([ADR-0007](adr/0007-golden-vectors.md)) |
 | NFR-6 | Numeric agreement: integer outputs exactly equal upstream; float outputs exact except ≤1 ULP on paths through non-correctly-rounded functions (`acos`, `log2`, `sin`, `cos`) | Differential tests; tolerance map in TDD §7 |
 | NFR-7 | Lint-clean: `cargo clippy --all-targets --all-features -- -D warnings` passes; the `[lints]` table (including `std_instead_of_core`, `std_instead_of_alloc`, `alloc_instead_of_core`) stays intact | Verification gate (§5) |
-| NFR-8 | Toolchain baseline: Rust 2024 edition, MSRV 1.88 (floor for `slice::as_chunks` and the project's modern-API style) | `rust-version` in `Cargo.toml`; gate runs on MSRV |
+| NFR-8 | Toolchain baseline: Rust 2024 edition, MSRV 1.89 (1.88 floor for `slice::as_chunks` and the project's modern-API style; 1.89 stabilizes the AVX-512 target features and intrinsics required by the `simd-avx512` kernel, [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md)) | `rust-version` in `Cargo.toml`; gate runs on MSRV |
 | NFR-9 | Documentation and comments in English; every public item references its upstream counterpart | Review criterion |
 | NFR-10 | Source files stay under ~1000 lines; tests are colocated with implementation in `#[cfg(test)]` modules | Review criterion; enforced at module boundaries |
-| NFR-11 | Performance: informative target ≤2× upstream compiled with its scalar profile ([ADR-0010](adr/0010-scalar-profile-fixtures.md)) on the shared corpus, for both execution time and peak allocation; measured by the bench harness ([ADR-0011](adr/0011-benchmark-methodology.md)). Not a merge gate; SIMD recovery remains future work | `bench/` harness run + gap report (attribution for time >1.5× / memory >1.3×) |
+| NFR-11 | Performance: informative target ≤2× upstream compiled with its scalar profile ([ADR-0010](adr/0010-scalar-profile-fixtures.md)) on the shared corpus, for both execution time and peak allocation; measured by the bench harness ([ADR-0011](adr/0011-benchmark-methodology.md)). Not a merge gate. SIMD recovery landed for `vc_decode` (P2.9, ADR-0012): 1.18× vs upstream shipped-SIMD | `bench/` harness run + gap report (attribution for time >1.5× / memory >1.3×) |
 
 ## 5. Acceptance (verification gates)
 
@@ -125,12 +125,15 @@ The commands are run exactly as written (same feature/target selection) — see 
 
 ## 6. Out of scope (phase 1)
 
-1. **SIMD paths** — upstream's SSE/AVX vertex-codec decode kernels are recovered behind the
-   opt-in, off-by-default `simd` feature (x86_64, implies `std`), scoped per
-   [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md); the scalar kernels remain the default
-   and the behavioral reference. Vertex-filter SIMD variants are permanently out of scope —
-   they are not output-identical to the scalar kernels ([ADR-0010](adr/0010-scalar-profile-fixtures.md)).
-   Non-x86_64 and `no_std` targets always get the scalar kernels.
+1. **SIMD paths** — upstream's SSE/AVX512 vertex-codec decode kernels are recovered behind the
+   opt-in, off-by-default `simd` feature (x86_64, compile-time dispatch with no runtime
+   detection: the target is assumed to have SSSE3+POPCNT, and `simd-avx512` selects the
+   AVX512-VBMI2 kernel), scoped per [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md); the
+   scalar kernels remain the default and the behavioral reference, and are compiled out under
+   `simd` exactly as upstream compiles them out without a cpuid fallback. Vertex-filter SIMD
+   variants are permanently out of scope — they are not output-identical to the scalar kernels
+   ([ADR-0010](adr/0010-scalar-profile-fixtures.md)). Non-x86_64 targets always get the scalar
+   kernels; `simd` itself is `no_std`-compatible.
 2. **Allocator customization** — `setAllocator`/`setAllocatorCache`; Rust's global allocator
    covers the use case.
 3. **`std`-only conveniences** — the default `std` feature selects only the math backend

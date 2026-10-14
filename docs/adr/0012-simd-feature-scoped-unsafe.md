@@ -67,3 +67,41 @@ approximations) and stay out of scope permanently.
   decision against `get_unchecked` bounds-check removal stands unchanged.
 - Future SIMD candidates (encode, filters) would require a superseding ADR plus, for
   filters, a redefinition of the behavioral oracle (output is not bit-identical).
+
+## Erratum (2026-10-14, implementation phase)
+
+Factual and scope corrections recorded during the P2.9 implementation; the decision
+itself (opt-in scoped-unsafe SIMD decode, scalar oracle) is unchanged. The original
+text above is preserved verbatim.
+
+1. **ISA facts.** Upstream's "SSE" decode kernel requires **SSSE3+POPCNT**
+   (`pshufb`/`popcnt`), not SSE2; x86_64 baseline is SSE2 only. The second x86 kernel
+   is **AVX512-VBMI2** (`SIMD_AVX` gate = VBMI+VBMI2+VL), not AVX2; upstream ships it
+   only when compiled with AVX512 flags.
+2. **Dispatch is compile-time (supersedes §1's detection language).** Per owner
+   decision there is no runtime detection: `simd` assumes the target has
+   SSSE3+POPCNT — the same contract as upstream compiled with `-mssse3 -mpopcnt`,
+   which also has no cpuid fallback; running on lesser hardware faults.
+   `simd-avx512` mirrors the `SIMD_AVX` compile gate and must only run on AVX512
+   hardware.
+3. **`simd` does not imply `std` (supersedes §1's `simd = ["std"]`).** The kernel is
+   pure `core::arch`; the only `std` dependency was the detection macro, which is
+   gone. `no_std` + `simd` builds are supported.
+4. **MSRV 1.88 → 1.89.** The AVX-512 target features and intrinsics
+   (`avx512f/bw/vl/vbmi/vbmi2`) are unstable in 1.88 (verified empirically:
+   `stdarch_x86_avx512` E0658) and stabilized in Rust 1.89.0 ("Stabilize the avx512
+   target features", PR #138940).
+5. **Scalar decode kernels are compiled out under `simd`**, mirroring upstream's
+   `#if defined(SIMD_FALLBACK) || no-SIMD` structure (`vertexcodec.cpp` L581): the
+   scalar bitstream/`decodeDeltas1`/`decodeVertexBlock` kernels exist only in
+   configurations that actually call them.
+6. **Safety-gate mechanics (§2 detail).** The `[lints.rust] unsafe_code = "forbid"`
+   table entry moved to `lib.rs`
+   (`cfg_attr(not(simd) → forbid, simd → deny)`) because the lints table cannot be
+   feature-conditional; the kernel module carries the crate's only
+   `#[allow(unsafe_code)]`.
+
+Measured result (P2.9): `vc_decode` Rust SIMD = **1.18×** upstream shipped-SIMD
+(was 6.9× scalar; scalar-vs-scalar unchanged), outputs hash-identical across
+scalar/SIMD builds; `cargo test --features simd` passes the full golden suite
+byte-exactly, including the every-prefix hostile fixtures.

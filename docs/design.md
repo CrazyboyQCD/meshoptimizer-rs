@@ -21,7 +21,7 @@
 | Item | Value | Rationale |
 |---|---|---|
 | Edition | 2024 | current stable; modern idiom required by project style |
-| MSRV | 1.88 | edition-2024 floor is 1.85; 1.88 adds `slice::as_chunks`, which the project style mandates |
+| MSRV | 1.89 | edition-2024 floor is 1.85; 1.88 adds `slice::as_chunks` (project style), 1.89 stabilizes the AVX-512 features/intrinsics needed by `simd-avx512` (ADR-0012) |
 | Features | `std` (default), `--no-default-features` = `no_std`, `simd` (opt-in, x86_64, implies `std`; unsafe-scoped decode kernels, [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md)) | backend selection ([ADR-0002](adr/0002-no-std-alloc-baseline.md)) |
 | Dependencies | `libm = "0.2"` only | `no_std` math backend ([ADR-0004](adr/0004-numeric-via-libm.md)) |
 | Dev-dependencies | none planned for phase 1 | fixtures embedded via `include_bytes!` |
