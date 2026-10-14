@@ -14,6 +14,12 @@ mod bitstream;
 mod decode;
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod decode_simd;
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+mod decode_simd_neon;
+#[cfg(all(feature = "simd", target_arch = "wasm32"))]
+mod decode_simd_wasm;
+#[cfg(feature = "simd")]
+mod decode_tables;
 mod encode;
 
 pub use decode::{decode_vertex_buffer, decode_vertex_version};
@@ -29,7 +35,14 @@ pub(crate) const BYTE_GROUP_DECODE_LIMIT: usize = 24;
 pub(crate) const TAIL_MIN_SIZE_V0: usize = 32;
 pub(crate) const TAIL_MIN_SIZE_V1: usize = 24;
 
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 pub(crate) const K_BITS_V0: [usize; 4] = [0, 2, 4, 8];
 pub(crate) const K_BITS_V1: [usize; 5] = [0, 1, 2, 4, 8];
 
@@ -56,12 +69,26 @@ pub(crate) fn zigzag16(v: u16) -> u16 {
     (0u16.wrapping_sub(v >> 15)) ^ (v << 1)
 }
 
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 pub(crate) fn unzigzag8(v: u8) -> u8 {
     (0u8.wrapping_sub(v & 1)) ^ (v >> 1)
 }
 
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 pub(crate) fn unzigzag16(v: u16) -> u16 {
     (0u16.wrapping_sub(v & 1)) ^ (v >> 1)
 }

@@ -232,6 +232,9 @@ fn encode_vertices(
     data_pos
 }
 
+// scalar decode cores: compiled only where the SIMD kernels are not (mirrors
+// upstream's scalar decodeMeshlet under `#if defined(SIMD_FALLBACK) || no-SIMD`)
+#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
 fn decode_vertices_core(
     vertex_count: usize,
     ctrl: &[u8],
@@ -282,6 +285,7 @@ fn decode_vertices_core(
     Some(data)
 }
 
+#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
 fn decode_triangles_core(
     triangle_count: usize,
     codes: &[u8],
@@ -392,6 +396,17 @@ pub fn encode_meshlet(buffer: &mut [u8], vertices: &[u32], triangles: &[u8]) -> 
     result
 }
 
+// ADR-0012: the `simd` feature swaps the scalar decode cores for the SSE4.1
+// SIMD kernels; every other configuration uses the scalar cores.
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
+mod decode_simd;
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
+use decode_simd::{
+    decode_triangles_simd as decode_triangles, decode_vertices_simd as decode_vertices,
+};
+#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+use {decode_triangles_core as decode_triangles, decode_vertices_core as decode_vertices};
+
 pub fn decode_meshlet(
     vertices: &mut [u8],
     vertex_count: usize,
@@ -423,7 +438,7 @@ pub fn decode_meshlet(
     debug_assert!(bound >= data_start && bound + 16 <= buffer.len());
 
     let data = match vertex_size {
-        4 => decode_vertices_core(
+        4 => decode_vertices(
             vertex_count,
             &buffer[ctrl_start..],
             data_start,
@@ -433,7 +448,7 @@ pub fn decode_meshlet(
                 vertices[idx * 4..idx * 4 + 4].copy_from_slice(&r.to_le_bytes());
             },
         ),
-        _ => decode_vertices_core(
+        _ => decode_vertices(
             vertex_count,
             &buffer[ctrl_start..],
             data_start,
@@ -449,7 +464,7 @@ pub fn decode_meshlet(
     };
 
     let data = match triangle_size {
-        4 => decode_triangles_core(
+        4 => decode_triangles(
             triangle_count,
             &buffer[codes_start..],
             data,
@@ -459,7 +474,7 @@ pub fn decode_meshlet(
                 triangles[i * 4..i * 4 + 4].copy_from_slice(&(tri >> 8).to_le_bytes());
             },
         ),
-        _ => decode_triangles_core(
+        _ => decode_triangles(
             triangle_count,
             &buffer[codes_start..],
             data,
@@ -506,7 +521,7 @@ pub fn decode_meshlet_raw(
     let bound = ctrl_start - gap_size;
     debug_assert!(bound + 16 <= buffer.len());
 
-    let Some(data) = decode_vertices_core(
+    let Some(data) = decode_vertices(
         vertex_count,
         &buffer[ctrl_start..],
         0,
@@ -519,7 +534,7 @@ pub fn decode_meshlet_raw(
         return false;
     };
 
-    let Some(data) = decode_triangles_core(
+    let Some(data) = decode_triangles(
         triangle_count,
         &buffer[codes_start..],
         data,

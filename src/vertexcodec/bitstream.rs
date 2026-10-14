@@ -160,7 +160,14 @@ pub(crate) fn encode_bytes(
 
 // upstream compiles the scalar decode kernels only without SIMD or with a
 // cpuid fallback (vertexcodec.cpp L581); the simd feature mirrors the former
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 pub(crate) fn decode_bytes_group(
     data: &[u8],
     pos: &mut usize,
@@ -243,7 +250,14 @@ pub(crate) fn decode_bytes_group(
 
 /// Unpacks `buffer_size` bytes from `data` at `*pos`. Returns false if the
 /// input limit is hit.
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 pub(crate) fn decode_bytes(
     data: &[u8],
     pos: &mut usize,
@@ -288,7 +302,14 @@ mod tests {
     // (internal kernels; behavior pinned through the public vertex codec fixtures
     // and the roundtrip property here).
     use super::*;
-    #[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+    #[cfg(not(all(
+        feature = "simd",
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "wasm32"
+        )
+    )))]
     use alloc::vec;
 
     fn reverse_reference(mut v: u8) -> u8 {
@@ -308,7 +329,14 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+    #[cfg(not(all(
+        feature = "simd",
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "wasm32"
+        )
+    )))]
     fn group_roundtrip_all_widths() {
         // deterministic pseudo-random payload with sentinel-heavy segments
         let mut state = 0x1234_5678u32;
@@ -347,7 +375,14 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+    #[cfg(not(all(
+        feature = "simd",
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "wasm32"
+        )
+    )))]
     fn bytes_roundtrip_mixed_groups() {
         let mut state = 0xfeed_beefu32;
         let mut lcg = || {

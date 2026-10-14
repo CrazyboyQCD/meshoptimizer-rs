@@ -1,42 +1,24 @@
-//! SIMD vertex-decode kernels (ADR-0012).
+//! SIMD vertex-decode kernels, x86_64 (ADR-0012).
 //!
 //! Upstream: `vertexcodec.cpp` (`decodeBytesGroupSimd`, `decodeBytesSimd`,
 //! `decodeDeltas4Simd`, `decodeVertexBlockSimd`, `transpose8`, `unzigzag8/16`,
-//! `rotate32`) at the pinned revision, ported line-for-line. Upstream's
-//! portable build selects these kernels at runtime when SSSE3+POPCNT are
-//! present (`SIMD_FALLBACK` cpuid path); the AVX512-VBMI2 kernel mirrors the
-//! `SIMD_AVX` compile gate as runtime detection. Both kernels are
-//! byte-identical to the scalar decoder ([ADR-0010](../../docs/adr/0010-scalar-profile-fixtures.md));
+//! `rotate32`) at the pinned revision, ported line-for-line. The SSSE3+POPCNT
+//! kernel assumes the ISA is present (upstream compiled with `-mssse3
+//! -mpopcnt`); the AVX512-VBMI2 kernel mirrors the `SIMD_AVX` compile gate
+//! behind the `simd-avx512` feature. Both kernels are byte-identical to the
+//! scalar decoder ([ADR-0010](../../docs/adr/0010-scalar-profile-fixtures.md));
 //! the golden suite is the differential oracle.
-//!
-//! This is the only module in the crate allowed to contain `unsafe`
-//! (ADR-0012); each block carries a safety comment referencing the upstream
-//! invariant it preserves.
 
 #![allow(unsafe_code)]
 
 use core::arch::x86_64::*;
 
+#[cfg(not(feature = "simd-avx512"))]
+use super::decode_tables::GROUP_SHUFFLE;
+use super::decode_tables::{HBTN, LANES};
 use super::{
     BYTE_GROUP_DECODE_LIMIT, BYTE_GROUP_SIZE, VERTEX_BLOCK_MAX_SIZE, VERTEX_BLOCK_SIZE_BYTES,
 };
-
-// 0 for 1-bit, 1 for 2-bit, 2 for 4-bit, 3 for 8-bit, and 4 for 0-bit as it
-// makes some of the uses easier
-const HBTN: [u32; 9] = [4, 1, 2, 3, 4, 0, 1, 2, 3];
-
-// mask out one bit per group that is set if all group bits were 1
-const LANES: [u64; 9] = [
-    0,
-    0x5555_5555,
-    0x1111_1111_1111_1111,
-    0,
-    0,
-    0xffff,
-    0x5555_5555,
-    0x1111_1111_1111_1111,
-    0,
-];
 
 // sent mask, replicating shuffle, and two multipliers (even/odd) for
 // multishift emulation
@@ -106,32 +88,6 @@ const GROUP_CONFIG_AVX512: [[[u8; 16]; 2]; 9] = [
     ],
     [[0; 16], [0; 16]],
 ];
-
-// upstream builds these tables at static-init time (decodeBytesGroupBuildTables);
-// a const-evaluated table is behavior-identical (same precedent as the remesher
-// marching-cubes tables)
-#[cfg(not(feature = "simd-avx512"))]
-const fn build_group_shuffle() -> [[u8; 8]; 256] {
-    let mut tables = [[0u8; 8]; 256];
-    let mut mask = 0usize;
-    while mask < 256 {
-        let mut shuffle = [0u8; 8];
-        let mut count = 0u8;
-        let mut i = 0usize;
-        while i < 8 {
-            let maski = ((mask >> i) & 1) as u8;
-            shuffle[i] = if maski != 0 { count } else { 0x80 };
-            count += maski;
-            i += 1;
-        }
-        tables[mask] = shuffle;
-        mask += 1;
-    }
-    tables
-}
-
-#[cfg(not(feature = "simd-avx512"))]
-static GROUP_SHUFFLE: [[u8; 8]; 256] = build_group_shuffle();
 
 // the kernel reads at most `kByteGroupDecodeLimit` (24) bytes from `data`: the
 // sent/sel loads touch [0, 8) and the skip-relative rest load ends at

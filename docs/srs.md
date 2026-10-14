@@ -125,14 +125,15 @@ The commands are run exactly as written (same feature/target selection) — see 
 
 ## 6. Out of scope (phase 1)
 
-1. **SIMD paths** — upstream's SSE/AVX512 vertex-codec decode kernels are recovered behind the
-   opt-in, off-by-default `simd` feature (x86_64, compile-time dispatch with no runtime
-   detection: the target is assumed to have SSSE3+POPCNT, and `simd-avx512` selects the
-   AVX512-VBMI2 kernel), scoped per [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md); the
-   scalar kernels remain the default and the behavioral reference, and are compiled out under
-   `simd` exactly as upstream compiles them out without a cpuid fallback. Vertex-filter SIMD
-   variants are permanently out of scope — they are not output-identical to the scalar kernels
-   ([ADR-0010](adr/0010-scalar-profile-fixtures.md)). Non-x86_64 targets always get the scalar
+1. **SIMD paths** — upstream's SIMD kernels are recovered behind the opt-in, off-by-default
+   `simd` feature (compile-time dispatch, no runtime detection): vertex-decode kernels for
+   x86_64 (SSSE3+POPCNT; `simd-avx512` selects the AVX512-VBMI2 kernel), aarch64 (NEON) and
+   wasm32 (SIMD128), plus the x86 meshlet-decode (SSE4.1) and spatial-sort box-merge (SSE2)
+   kernels, scoped per [ADR-0012](adr/0012-simd-feature-scoped-unsafe.md); the scalar kernels
+   remain the default and the behavioral reference, and are compiled out where a SIMD kernel
+   replaces them (mirroring upstream's `#if` structure). Vertex-filter SIMD variants are
+   permanently out of scope — they are not output-identical to the scalar kernels
+   ([ADR-0010](adr/0010-scalar-profile-fixtures.md)). Non-SIMD targets always get the scalar
    kernels; `simd` itself is `no_std`-compatible.
 2. **Allocator customization** — `setAllocator`/`setAllocatorCache`; Rust's global allocator
    covers the use case.

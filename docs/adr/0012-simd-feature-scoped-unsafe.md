@@ -105,3 +105,30 @@ Measured result (P2.9): `vc_decode` Rust SIMD = **1.18×** upstream shipped-SIMD
 (was 6.9× scalar; scalar-vs-scalar unchanged), outputs hash-identical across
 scalar/SIMD builds; `cargo test --features simd` passes the full golden suite
 byte-exactly, including the every-prefix hostile fixtures.
+
+## Erratum 2 (2026-10-14, P2.10/P2.11 — full upstream SIMD support surface)
+
+1. **Kernel scope extended to the complete upstream SIMD surface.** Besides the
+   vertex-decode kernels: meshlet decode (SSE4.1, `meshletcodec.cpp`
+   `decodeBuildTables`/`decodeTriangleGroup`/`decodeVertexGroup`/`decodeMeshletSimd`),
+   spatial-sort box merge (SSE2 + NEON, `clusterizer.cpp` `boxMerge`), vertex
+   decode NEON (aarch64) and WASM SIMD128 (wasm32). NEON is aarch64-baseline
+   (no detection, as upstream's `__aarch64__` build); WASM requires the
+   `simd128` target feature (mirroring `__wasm_simd128__`). The `simd`
+   contract is therefore: x86_64 = SSSE3+POPCNT (+SSE4.1 for meshlet decode),
+   aarch64 = NEON, wasm32 = simd128; unsupported architectures keep scalar.
+   Vertex-filter SIMD remains permanently out of scope.
+2. **Meshlet SIMD write divergences (invisible in the specified region).**
+   Upstream overwrites up to 3 bytes past the logical triangle/vertex tail to
+   amortize stores ("32-bit aligned size available"); Rust slice bounds forbid
+   that, so tails write exactly the logical elements. Upstream `Raw` decoding
+   writes padded rounded counts; this port decodes exact counts (same pointer
+   progression and accept/reject) and writes the logical region only.
+3. **boxMerge bit-exactness precondition verified**: the SSE/NEON extent sum
+   order matches the scalar version exactly, and the boxes array carries the
+   upstream `face_count + 1` padding element for the register over-read.
+4. **Cross-check tier.** aarch64/wasm32 kernels compile via
+   `cargo check --target aarch64-pc-windows-msvc --features simd` and
+   `cargo check --target wasm32-unknown-unknown --features simd`; they carry
+   no local hardware coverage — the golden oracle runs on them in the GitHub
+   CI tier.

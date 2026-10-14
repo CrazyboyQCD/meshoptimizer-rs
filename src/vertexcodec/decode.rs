@@ -9,9 +9,23 @@ use super::{
 };
 // upstream compiles the scalar decode kernels only without SIMD or with a
 // cpuid fallback (vertexcodec.cpp L581); the simd feature mirrors the former
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 use super::bitstream::decode_bytes;
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 use super::{
     BYTE_GROUP_SIZE, K_BITS_V0, K_BITS_V1, VERTEX_BLOCK_MAX_SIZE, VERTEX_BLOCK_SIZE_BYTES, rotate,
     unzigzag8, unzigzag16,
@@ -20,7 +34,14 @@ use super::{
 // the scratch buffer is reused per 4-byte group: decodeDeltas1 walks its
 // columns internally (buffer += vertex_count * sizeof(T) per sub-iteration),
 // so `buffer` is always the full scratch and tbase/lbase are the group offset
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 fn decode_deltas1_u8(
     buffer: &[u8],
     transposed: &mut [u8],
@@ -48,7 +69,14 @@ fn decode_deltas1_u8(
     }
 }
 
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 fn decode_deltas1_u16(
     buffer: &[u8],
     transposed: &mut [u8],
@@ -78,7 +106,14 @@ fn decode_deltas1_u16(
 }
 
 // port shape: mirrors the upstream function signature 1:1 (C-parity, ADR-0005)
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 #[allow(clippy::too_many_arguments)]
 fn decode_deltas1_u32_xor(
     buffer: &[u8],
@@ -115,7 +150,14 @@ fn decode_deltas1_u32_xor(
 }
 
 // port shape: mirrors the upstream function signature 1:1 (C-parity, ADR-0005)
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn decode_vertex_block(
     data: &[u8],
@@ -236,11 +278,21 @@ pub(super) fn decode_vertex_block(
 
 // ADR-0012: the `simd` feature swaps the block decoder for the compile-time
 // selected SIMD kernel; every other configuration calls the scalar kernel.
+#[cfg(not(all(
+    feature = "simd",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )
+)))]
+use self::decode_vertex_block as decode_vertex_block_impl;
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use super::decode_simd::decode_vertex_block as decode_vertex_block_impl;
-
-#[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
-use self::decode_vertex_block as decode_vertex_block_impl;
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+use super::decode_simd_neon::decode_vertex_block as decode_vertex_block_impl;
+#[cfg(all(feature = "simd", target_arch = "wasm32"))]
+use super::decode_simd_wasm::decode_vertex_block as decode_vertex_block_impl;
 
 /// Upstream: `meshopt_decodeVertexVersion`. Returns the stream version
 /// (`0..=1`), or -1 if the buffer does not carry a valid vertex codec header.

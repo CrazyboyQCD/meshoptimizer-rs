@@ -1,5 +1,9 @@
 //! Spatial meshlet builder (`meshopt_buildMeshletsSpatial` and its BVH internals,
 //! from `clusterizer.cpp`).
+#![cfg_attr(
+    all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")),
+    allow(unsafe_code)
+)]
 
 use super::meshlets::{Meshlet, append_meshlet, clear_used};
 
@@ -9,12 +13,27 @@ struct BvhBox {
     max: [f32; 3],
 }
 
+// upstream BVHBoxT carries a 4th float per bound so the SIMD boxMerge can
+// load/store whole registers; the extra lane holds no semantic value
+#[cfg(not(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64"))))]
 #[derive(Clone, Copy)]
 struct BvhBoxT {
     min: [f32; 3],
     max: [f32; 3],
 }
 
+// upstream BVHBoxT carries a 4th float per bound so the SIMD boxMerge can
+// load/store whole registers; the extra lane holds no semantic value.
+// The SIMD merge reads/writes the fields through raw pointers, hence the allow.
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+struct BvhBoxT {
+    min: [f32; 4],
+    max: [f32; 4],
+}
+
+#[cfg(not(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64"))))]
 fn box_merge(bvbox: &mut BvhBoxT, other: &BvhBox) -> f32 {
     for k in 0..3 {
         bvbox.min[k] = if other.min[k] < bvbox.min[k] {
@@ -33,6 +52,70 @@ fn box_merge(bvbox: &mut BvhBoxT, other: &BvhBox) -> f32 {
     let sy = bvbox.max[1] - bvbox.min[1];
     let sz = bvbox.max[2] - bvbox.min[2];
     sx * sy + sy * sz + sz * sx
+}
+
+// Upstream: `boxMerge` SSE variant (clusterizer.cpp L654). The extent sum
+// order matches the scalar version exactly ((sx*sy + sy*sz) + sz*sx), so the
+// results are bit-identical.
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
+fn box_merge(bvbox: &mut BvhBoxT, other: &BvhBox) -> f32 {
+    use core::arch::x86_64::*;
+
+    // SAFETY: the 16-byte loads at `other.min`/`other.max` overread one float
+    // into the adjacent field or, for the last box, into the allocated padding
+    // element (the boxes array carries face_count + 1 entries for exactly
+    // this, mirroring upstream clusterizer.cpp L1302); the accumulator is a
+    // 4-float BvhBoxT so both register stores stay in-struct. Only SSE2 is
+    // required (baseline on x86_64).
+    unsafe {
+        let other_ptr = core::ptr::from_ref(other).cast::<f32>();
+        let accum_ptr = core::ptr::from_mut(bvbox).cast::<f32>();
+
+        let mut min = _mm_loadu_ps(other_ptr);
+        let mut max = _mm_loadu_ps(other_ptr.add(3));
+        min = _mm_min_ps(min, _mm_loadu_ps(accum_ptr));
+        max = _mm_max_ps(max, _mm_loadu_ps(accum_ptr.add(4)));
+
+        _mm_storeu_ps(accum_ptr, min);
+        _mm_storeu_ps(accum_ptr.add(4), max);
+
+        let size = _mm_sub_ps(max, min);
+        let size_yzx = _mm_shuffle_ps::<0b00_00_10_01>(size, size);
+        let mul = _mm_mul_ps(size, size_yzx);
+        let sum_xy = _mm_add_ss(mul, _mm_shuffle_ps::<0b01_01_01_01>(mul, mul));
+        let sum_xyz = _mm_add_ss(sum_xy, _mm_shuffle_ps::<0b10_10_10_10>(mul, mul));
+
+        _mm_cvtss_f32(sum_xyz)
+    }
+}
+
+// Upstream: `boxMerge` NEON variant (clusterizer.cpp L675).
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+fn box_merge(bvbox: &mut BvhBoxT, other: &BvhBox) -> f32 {
+    use core::arch::aarch64::*;
+
+    // SAFETY: same bounds as the x86 variant (in-struct lanes plus the
+    // allocated padding element after the last box)
+    unsafe {
+        let other_ptr = core::ptr::from_ref(other).cast::<f32>();
+        let accum_ptr = core::ptr::from_mut(bvbox).cast::<f32>();
+
+        let mut min = vld1q_f32(other_ptr);
+        let mut max = vld1q_f32(other_ptr.add(3));
+        min = vminq_f32(min, vld1q_f32(accum_ptr));
+        max = vmaxq_f32(max, vld1q_f32(accum_ptr.add(4)));
+
+        vst1q_f32(accum_ptr, min);
+        vst1q_f32(accum_ptr.add(4), max);
+
+        let size = vsubq_f32(max, min);
+        let size_yzx = vextq_f32(vextq_f32(size, size, 3), size, 2);
+        let mul = vmulq_f32(size, size_yzx);
+        let sum_xy = vgetq_lane_f32::<0>(mul) + vgetq_lane_f32::<1>(mul);
+        let sum_xyz = sum_xy + vgetq_lane_f32::<2>(mul);
+
+        sum_xyz
+    }
 }
 
 fn radix_float(v: u32) -> u32 {
@@ -214,11 +297,18 @@ fn bvh_divisible(count: usize, min: usize, max: usize) -> bool {
 }
 
 fn bvh_compute_area(areas: &mut [f32], boxes: &[BvhBox], order: &[u32]) {
-    let mut accuml = BvhBoxT {
+    #[cfg(not(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    let init = BvhBoxT {
         min: [f32::MAX; 3],
         max: [-f32::MAX; 3],
     };
-    let mut accumr = accuml;
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    let init = BvhBoxT {
+        min: [f32::MAX, f32::MAX, f32::MAX, 0.0],
+        max: [-f32::MAX, -f32::MAX, -f32::MAX, 0.0],
+    };
+    let mut accuml = init;
+    let mut accumr = init;
 
     let count = order.len();
 
@@ -534,12 +624,14 @@ pub fn build_meshlets_spatial(
     let vertex_stride_float = vertex_positions_stride / 4;
 
     // compute bounding boxes and centroids for sorting
+    // the extra element pads the array so the SIMD boxMerge can load whole
+    // registers past the last box (upstream allocates face_count + 1 too)
     let mut boxes = alloc::vec![
         BvhBox {
             min: [0.0; 3],
             max: [0.0; 3]
         };
-        face_count
+        face_count + 1
     ];
     let mut centroids = alloc::vec![0.0f32; face_count * 3];
     bvh_prepare(
