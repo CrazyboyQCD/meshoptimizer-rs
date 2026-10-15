@@ -464,12 +464,8 @@ fn solidify(
 
             let base = res * yz;
 
-            for x in 1..res - 1 {
-                grid[base + x] = if grid[base + x] == 0 {
-                    0xff
-                } else {
-                    grid[base + x]
-                };
+            for b in &mut grid[base + 1..base + res - 1] {
+                *b = if *b == 0 { 0xff } else { *b };
             }
         }
     }
@@ -495,20 +491,25 @@ fn solidify(
 
         // propagate outside state to the interior within row; rows without occupied voxels have no 'inside' voxels
         if rowmap[row] != EMPTY_SLOT {
-            for x in 1..res - 1 {
-                grid[base + x] = if grid[base + x] == 0xff && grid[base + x - 1] == 0 {
-                    0
-                } else {
-                    grid[base + x]
-                };
+            let data = &mut grid[base..base + res];
+
+            let mut prev = data[0];
+            let mut next = data[res - 1];
+
+            let mid = &mut data[1..res - 1];
+
+            for cur in mid.iter_mut() {
+                if *cur == 0xff && prev == 0 {
+                    *cur = 0;
+                }
+                prev = *cur;
             }
 
-            for x in (1..res - 1).rev() {
-                grid[base + x] = if grid[base + x] == 0xff && grid[base + x + 1] == 0 {
-                    0
-                } else {
-                    grid[base + x]
-                };
+            for cur in mid.iter_mut().rev() {
+                if *cur == 0xff && next == 0 {
+                    *cur = 0;
+                }
+                next = *cur;
             }
         }
 
@@ -546,16 +547,22 @@ fn solidify(
             }
 
             let nbase = res * yzn;
+
+            // current row and neighbor row are disjoint full-width row ranges, so
+            // splitting at the later row's start yields both as independent slices
+            let (data, datan) = if nbase > base {
+                let (l, r) = grid.split_at_mut(nbase);
+                (&l[base..base + res], &mut r[..res])
+            } else {
+                let (l, r) = grid.split_at_mut(base);
+                (&r[..res], &mut l[nbase..nbase + res])
+            };
             let mut changed = 0u8;
 
-            for x in 1..res - 1 {
-                let rep = if grid[base + x] == 0 && grid[nbase + x] == 0xff {
-                    0
-                } else {
-                    grid[nbase + x]
-                };
-                changed |= rep ^ grid[nbase + x];
-                grid[nbase + x] = rep;
+            for (s, d) in data[1..res - 1].iter().zip(datan[1..res - 1].iter_mut()) {
+                let rep = if *s == 0 && *d == 0xff { 0 } else { *d };
+                changed |= rep ^ *d;
+                *d = rep;
             }
 
             if changed != 0 {

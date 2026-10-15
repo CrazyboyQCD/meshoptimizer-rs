@@ -185,18 +185,28 @@ pub(super) fn polygonize(
 
             let base = res * row;
 
-            // we track each slice as a 8-bit code (matching cube indexing) as we iterate through the row to avoid extra lookups
-            let mut last = (grid[base] != 0) as i32
-                | ((grid[base + res] != 0) as i32) << 2
-                | ((grid[base + slice] != 0) as i32) << 4
-                | ((grid[base + slice + res] != 0) as i32) << 6;
+            // four grid rows feeding the cube codes; hoisting them as slices removes
+            // the per-cell bounds checks in the scan loop below
+            let r0 = &grid[base..base + res];
+            let r1 = &grid[base + res..base + 2 * res];
+            let r2 = &grid[base + slice..base + slice + res];
+            let r3 = &grid[base + slice + res..base + slice + 2 * res];
 
-            for x in 0..resolution - 1 {
-                let xn = x as usize + 1;
-                let next = (grid[base + xn] != 0) as i32
-                    | ((grid[base + xn + res] != 0) as i32) << 2
-                    | ((grid[base + xn + slice] != 0) as i32) << 4
-                    | ((grid[base + xn + slice + res] != 0) as i32) << 6;
+            // we track each slice as a 8-bit code (matching cube indexing) as we iterate through the row to avoid extra lookups
+            let mut last = (r0[0] != 0) as i32
+                | ((r1[0] != 0) as i32) << 2
+                | ((r2[0] != 0) as i32) << 4
+                | ((r3[0] != 0) as i32) << 6;
+
+            for (x, (g0, (g1, (g2, g3)))) in (0..resolution - 1).zip(
+                r0[1..]
+                    .iter()
+                    .zip(r1[1..].iter().zip(r2[1..].iter().zip(r3[1..].iter()))),
+            ) {
+                let next = ((*g0 != 0) as i32)
+                    | ((*g1 != 0) as i32) << 2
+                    | ((*g2 != 0) as i32) << 4
+                    | ((*g3 != 0) as i32) << 6;
 
                 // next slice bits are in position for the next iteration so we need to shift them to retrieve current cube code
                 let cube = last | (next << 1);
@@ -235,8 +245,12 @@ pub(super) fn polygonize(
                     if result < max_triangle_count {
                         let tri = *tri;
 
+                        let slot = &mut dest[result * 9..result * 9 + 9];
+                        let (s0, rest) = slot.split_at_mut(3);
+                        let (s1, s2) = rest.split_at_mut(3);
+
                         emit_vertex(
-                            &mut dest[result * 9..result * 9 + 3],
+                            s0,
                             x,
                             y,
                             z,
@@ -248,7 +262,7 @@ pub(super) fn polygonize(
                             offset,
                         );
                         emit_vertex(
-                            &mut dest[result * 9 + 3..result * 9 + 6],
+                            s1,
                             x,
                             y,
                             z,
@@ -260,7 +274,7 @@ pub(super) fn polygonize(
                             offset,
                         );
                         emit_vertex(
-                            &mut dest[result * 9 + 6..result * 9 + 9],
+                            s2,
                             x,
                             y,
                             z,
