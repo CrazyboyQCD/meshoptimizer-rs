@@ -70,7 +70,7 @@ upstream behavior to stay compatible with in that window.
   and no vectorization benefit was measured); the quantize API paths keep
   `cast_i32`. New hot-path conversion sites must choose between the two ADRs explicitly.
 
-## 勘误 1 (2026-10-15): vertex filter decode kernels join the inventory
+## Erratum 1 (2026-10-15): vertex filter decode kernels join the inventory
 
 The vertex filters that feed the vertex codec are bound by ADR-0010's scalar-output
 contract (byte-identical to the scalar oracle), so their decoded bytes are wire-visible

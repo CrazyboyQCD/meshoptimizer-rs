@@ -63,7 +63,7 @@ fn decode_filter_oct_s8(data: &mut [u8], count: usize) {
     }
 }
 
-#[allow(unsafe_code)] // ADR-0014 勘误 1: audited plain-truncation site, sound for every input
+#[allow(unsafe_code)] // ADR-0014 erratum 1: audited plain-truncation site, sound for every input
 fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
     let max = 32767f32;
 
@@ -91,7 +91,7 @@ fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
         // finite for every input
         let s = if l == 0.0 { 0.0 } else { max / l };
 
-        // SAFETY: plain truncation (ADR-0014 勘误 1). For every input: l == 0 implies
+        // SAFETY: plain truncation (ADR-0014 erratum 1). For every input: l == 0 implies
         // x = y = z = 0, so the arguments are exactly ±0.5; l > 0 implies each of
         // |x|, |y|, |z| is bounded by l up to three rounding steps, so the arguments
         // lie within max * (1 + 2^-22). Always finite, always representable.
@@ -113,7 +113,7 @@ fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
     }
 }
 
-#[allow(unsafe_code)] // ADR-0014 勘误 1: audited plain-truncation site, sound for every input
+#[allow(unsafe_code)] // ADR-0014 erratum 1: audited plain-truncation site, sound for every input
 fn decode_filter_quat_s16(data: &mut [u8], count: usize) {
     let scale = 32767f32 / math::sqrt(2.0);
 
@@ -138,7 +138,7 @@ fn decode_filter_quat_s16(data: &mut [u8], count: usize) {
         // compute final scale; note that all computations above are unscaled
         let ss = scale / s;
 
-        // SAFETY: plain truncation (ADR-0014 勘误 1). For every input: `wi | 3` is never
+        // SAFETY: plain truncation (ADR-0014 erratum 1). For every input: `wi | 3` is never
         // zero (|s| >= 1), so ss is finite; |x * ss| <= 32767 * scale < 2^30 and
         // |w * ss| <= sqrt(2) * scale up to one rounding step. Always finite, always
         // representable, no NaN reachable.
@@ -673,7 +673,7 @@ mod tests {
         );
     }
 
-    // ADR-0014 勘误 1: the plain-truncation kernels must stay byte-identical to the
+    // ADR-0014 erratum 1: the plain-truncation kernels must stay byte-identical to the
     // cast_i32 formulation (the upstream semantics) for every input, including the
     // exactly-zero normal, extreme magnitudes, and the degenerate quaternion scales.
     // Random sweeps are LCG-driven and deterministic like the fixture generators.
