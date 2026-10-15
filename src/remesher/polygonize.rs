@@ -124,7 +124,7 @@ fn quadric_decider(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn polygonize(
-    mut destination: Option<&mut [f32]>,
+    destination: Option<&mut [f32]>,
     grid: &[u8],
     rowmap: &[u32],
     voxels: Option<&[Voxel]>,
@@ -139,10 +139,66 @@ pub(super) fn polygonize(
     let slice = res * res;
     let rscale = 1.0 / scale;
 
+    // the destination is fixed per call, so the count/fill dispatch is hoisted out of
+    // the scan instead of re-testing the Option per non-empty cell
+    let Some(dest) = destination else {
+        // counting run: scan plus per-cube triangle counts; no deciders or emission
+        for z in 0..resolution - 1 {
+            for y in 0..resolution - 1 {
+                let row = y as usize + res * z as usize;
+
+                // skip processing if all four rows are entirely empty as that guarantees empty output (even three out of four would be enough but that's more expensive to check)
+                if (rowmap[row] & rowmap[row + 1] & rowmap[row + res] & rowmap[row + res + 1])
+                    == EMPTY_SLOT
+                {
+                    continue;
+                }
+
+                let base = res * row;
+
+                // four grid rows feeding the cube codes; hoisting them as slices removes
+                // the per-cell bounds checks in the scan loop below
+                let r0 = &grid[base..base + res];
+                let r1 = &grid[base + res..base + 2 * res];
+                let r2 = &grid[base + slice..base + slice + res];
+                let r3 = &grid[base + slice + res..base + slice + 2 * res];
+
+                // we track each slice as a 8-bit code (matching cube indexing) as we iterate through the row to avoid extra lookups
+                let mut last = (r0[0] != 0) as i32
+                    | ((r1[0] != 0) as i32) << 2
+                    | ((r2[0] != 0) as i32) << 4
+                    | ((r3[0] != 0) as i32) << 6;
+
+                for (g0, (g1, (g2, g3))) in r0[1..]
+                    .iter()
+                    .zip(r1[1..].iter().zip(r2[1..].iter().zip(r3[1..].iter())))
+                {
+                    let next = ((*g0 != 0) as i32)
+                        | ((*g1 != 0) as i32) << 2
+                        | ((*g2 != 0) as i32) << 4
+                        | ((*g3 != 0) as i32) << 6;
+
+                    // next slice bits are in position for the next iteration so we need to shift them to retrieve current cube code
+                    let cube = last | (next << 1);
+                    last = next;
+
+                    if cube == 0 || cube == 0xff {
+                        continue;
+                    }
+
+                    // fast path: we can statically determine the upper bound on triangles the loop below will output based on cube configuration
+                    result += tables.count[cube as usize] as usize;
+                }
+            }
+        }
+
+        return result;
+    };
+
     // counting runs never reach deciders or emission, so the empty fallback is
     // never dereferenced there
     let voxel_data: &[Voxel] = voxels.unwrap_or(&[]);
-    let max_triangle_count = destination.as_ref().map_or(0, |d| d.len() / 9);
+    let max_triangle_count = dest.len() / 9;
 
     for z in 0..resolution - 1 {
         for y in 0..resolution - 1 {
@@ -187,12 +243,6 @@ pub(super) fn polygonize(
                 if cube == 0 || cube == 0xff {
                     continue;
                 }
-
-                let Some(dest) = destination.as_deref_mut() else {
-                    // fast path: we can statically determine the upper bound on triangles the loop below will output based on cube configuration
-                    result += tables.count[cube as usize] as usize;
-                    continue;
-                };
 
                 // deciders are only evaluated for cells with an alternate configuration to reduce overhead
                 let mut alt = 0usize;
