@@ -361,27 +361,16 @@ fn voxelize(
                 let hx = (px * (scale * 2.0)) as i32;
                 let hy = (py * (scale * 2.0)) as i32;
                 let hz = (pz * (scale * 2.0)) as i32;
-                let mut x = hx >> 1;
-                let mut y = hy >> 1;
-                let mut z = hz >> 1;
 
                 // safety: rounding errors and non-finite inputs may produce out of bounds coordinates, so we clamp them
-                let cutoff = resolution - 3;
-                x = if (x as u32) < (cutoff as u32) {
-                    x
-                } else {
-                    cutoff
-                };
-                y = if (y as u32) < (cutoff as u32) {
-                    y
-                } else {
-                    cutoff
-                };
-                z = if (z as u32) < (cutoff as u32) {
-                    z
-                } else {
-                    cutoff
-                };
+                // clamping in u32 domain via min is bit-identical to the compare-select
+                // form (negative x wraps to a huge u32 and pulls the min to cutoff) but
+                // gives the compiler a provable [0, cutoff] range so the grid/voxel index
+                // bounds checks below fold away
+                let cutoff = (resolution - 3) as u32;
+                let x = ((hx >> 1) as u32).min(cutoff);
+                let y = ((hy >> 1) as u32).min(cutoff);
+                let z = ((hz >> 1) as u32).min(cutoff);
 
                 let res = resolution as usize;
                 let row = (y as usize + 1) + res * (z as usize + 1);
@@ -390,7 +379,7 @@ fn voxelize(
                 if let Some(voxels) = voxels.as_deref_mut() {
                     let vox = &mut voxels[rowmap[row] as usize + grid[idx] as usize - 1];
 
-                    vox.coord = ((x as u32) << 20) | ((y as u32) << 10) | z as u32;
+                    vox.coord = (x << 20) | (y << 10) | z;
                     vox.octants |= 1u8 << ((hx & 1) | ((hy & 1) << 1) | ((hz & 1) << 2));
 
                     voxel_accumulate(vox, px, py, pz, weight);
