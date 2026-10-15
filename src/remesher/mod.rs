@@ -344,12 +344,18 @@ fn voxelize(
         };
 
         for u in 0..=samples {
+            // per-u row base: same evaluation tree as sx + su * ex + sv * fx, one add
+            // cheaper per sample
+            let su = u as f32 * sr;
+            let pxu = sx + su * ex;
+            let pyu = sy + su * ey;
+            let pzu = sz + su * ez;
+
             for v in 0..=samples - u {
-                let su = u as f32 * sr;
                 let sv = v as f32 * sr;
-                let px = sx + su * ex + sv * fx;
-                let py = sy + su * ey + sv * fy;
-                let pz = sz + su * ez + sv * fz;
+                let px = pxu + sv * fx;
+                let py = pyu + sv * fy;
+                let pz = pzu + sv * fz;
 
                 // compute coordinates with an extra bit to use in octant mask
                 let hx = (px * (scale * 2.0)) as i32;
