@@ -1,7 +1,7 @@
 //! Isosurface extraction for the remesher: per-voxel position emission,
 //! alternate-configuration deciders, and marching-cubes polygonization.
-//! Upstream: `emitVertex`, `octantDecider`, `quadricDecider`, `polygonize`
-//! (remesher.cpp).
+//! Upstream: `emitVertex` (inlined into `polygonize` with a per-cell corner
+//! cache), `octantDecider`, `quadricDecider`, `polygonize` (remesher.cpp).
 
 use super::tables::RemeshTables;
 use super::{EMPTY_SLOT, REMESH_SOLVE, Voxel};
@@ -12,34 +12,6 @@ fn voxel_error(vox: &Voxel, x: f32, y: f32, z: f32) -> f32 {
     let rz = (vox.b2 + vox.a20 * x) * 2.0 + vox.a22 * z;
 
     (vox.c + rx * x + ry * y + rz * z).abs()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn emit_vertex(
-    result: &mut [f32],
-    x: i32,
-    y: i32,
-    z: i32,
-    corner: i32,
-    grid: &[u8],
-    rowmap: &[u32],
-    voxels: &[Voxel],
-    resolution: i32,
-    offset: &[f32; 3],
-) {
-    let ox = corner & 1;
-    let oy = (corner >> 1) & 1;
-    let oz = (corner >> 2) & 1;
-    let res = resolution as usize;
-
-    let row = (y as usize + oy as usize) + res * (z as usize + oz as usize);
-    let idx = (x as usize + ox as usize) + res * row;
-
-    let vox = &voxels[rowmap[row] as usize + grid[idx] as usize - 1];
-
-    result[0] = vox.px + offset[0];
-    result[1] = vox.py + offset[1];
-    result[2] = vox.pz + offset[2];
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -236,6 +208,13 @@ pub(super) fn polygonize(
 
                 let tris = &tables.triangles[cube as usize][alt];
 
+                // a cell's triangles reference at most 4 distinct corner voxels, so the
+                // per-cell cache dedups the rowmap/grid/voxels gather chain. Emitted
+                // corners are always occupied (never 0 or 0xff interior; see the note in
+                // `octant_decider`), so `grid[..] - 1` is a valid voxel index
+                let mut cache = [[0f32; 3]; 8];
+                let mut mask = 0u8;
+
                 for tri in tris.iter() {
                     if *tri == 0 {
                         break;
@@ -249,42 +228,35 @@ pub(super) fn polygonize(
                         let (s0, rest) = slot.split_at_mut(3);
                         let (s1, s2) = rest.split_at_mut(3);
 
-                        emit_vertex(
-                            s0,
-                            x,
-                            y,
-                            z,
-                            i32::from((tri >> 8) & 0xf),
-                            grid,
-                            rowmap,
-                            voxel_data,
-                            resolution,
-                            offset,
-                        );
-                        emit_vertex(
-                            s1,
-                            x,
-                            y,
-                            z,
-                            i32::from((tri >> 4) & 0xf),
-                            grid,
-                            rowmap,
-                            voxel_data,
-                            resolution,
-                            offset,
-                        );
-                        emit_vertex(
-                            s2,
-                            x,
-                            y,
-                            z,
-                            i32::from(tri & 0xf),
-                            grid,
-                            rowmap,
-                            voxel_data,
-                            resolution,
-                            offset,
-                        );
+                        for (corner, dst) in [
+                            (i32::from((tri >> 8) & 0xf), s0),
+                            (i32::from((tri >> 4) & 0xf), s1),
+                            (i32::from(tri & 0xf), s2),
+                        ] {
+                            let c = corner as usize;
+
+                            if mask & (1 << c) == 0 {
+                                let ox = corner & 1;
+                                let oy = (corner >> 1) & 1;
+                                let oz = (corner >> 2) & 1;
+
+                                let row =
+                                    (y as usize + oy as usize) + res * (z as usize + oz as usize);
+                                let idx = (x as usize + ox as usize) + res * row;
+
+                                let vox =
+                                    &voxel_data[rowmap[row] as usize + grid[idx] as usize - 1];
+
+                                cache[c] =
+                                    [vox.px + offset[0], vox.py + offset[1], vox.pz + offset[2]];
+                                mask |= 1 << c;
+                            }
+
+                            let [px, py, pz] = cache[c];
+                            dst[0] = px;
+                            dst[1] = py;
+                            dst[2] = pz;
+                        }
                     }
 
                     result += 1;
