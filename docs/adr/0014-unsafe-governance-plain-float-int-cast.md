@@ -69,3 +69,45 @@ upstream behavior to stay compatible with in that window.
 - `voxelize` keeps ADR-0013's saturating `as` (its downstream clamp absorbs saturation,
   and no vectorization benefit was measured); the quantize API paths keep
   `cast_i32`. New hot-path conversion sites must choose between the two ADRs explicitly.
+
+## 勘误 1 (2026-10-15): vertex filter decode kernels join the inventory
+
+The vertex filters that feed the vertex codec are bound by ADR-0010's scalar-output
+contract (byte-identical to the scalar oracle), so their decoded bytes are wire-visible
+and must match upstream exactly on **every** input — including bytes produced by a
+hostile decoder. `meshopt_decodeFilterOct`/`Quat` round three or four floats per element
+through `cast_i32`, whose branch blocks loop vectorization even in the chunked kernel
+shape (measured 2026-10-15, interleaved 3×3, bench corpus `vf_*`):
+
+| kernel variant | vf_oct | vf_quat |
+|---|---|---|
+| stride-indexed (pre-chunking) | 5.56x | 2.55x |
+| chunked, saturating `as` | 2.64x | 1.48x |
+| chunked, `to_int_unchecked` | **2.07x** | **1.15x** |
+
+Decision, per kernel:
+
+1. **`decode_filter_quat_s16`**: plain `to_int_unchecked::<i32>()` with no input
+   precondition. For every `i16` input, `sf = wi | 3` is never zero (`|s| >= 1`), so `ss
+   = scale / s` is finite; `|x * ss| <= 32767 * (32767 / sqrt(2)) < 2^30` and
+   `|w * ss| <= sqrt(2) * scale` up to one rounding step; no NaN is reachable. The
+   converted value is always representable — the site is unconditionally sound.
+2. **`decode_filter_oct_s16`**: one guard `s = if l == 0.0 { 0.0 } else { max / l }`
+   (a compare-select, stays inside the vectorized loop) removes the only NaN path
+   (`0 * inf` when the normal is exactly zero). With `l > 0`, each of `|x|, |y|, |z|` is
+   bounded by `l` up to three monotone rounding steps, so all three converted arguments
+   lie within `max * (1 + 2^-22)`; with `l == 0` the input is exactly zero and the
+   arguments are `±0.5`. The converted value is always representable — the site is
+   unconditionally sound, **unlike `compute_vertex_ids` it requires no documented
+   precondition**: the decode filters accept arbitrary decoded bytes.
+3. Output bytes are unchanged for every input: in-bounds truncation is identical to the
+   saturating cast, and the former NaN path (`cast_i32 -> i32::MIN -> truncating i16
+   cast`) and the guard path (`0 * 0 + ±0.5 -> 0`) both produce zero bytes. A colocated
+   differential test pins the kernels against a `cast_i32` reference over zero, extreme,
+   and randomized sweeps; the filter goldens and the differential tests run clean under
+   Miri (which flags `float_to_int_unchecked` out-of-range as UB).
+
+The inventory grows to: `simplifier::sloppy::compute_vertex_ids`,
+`vertexcodec::decode_simd`, `vertexfilter::decode_filter_oct_s16`,
+`vertexfilter::decode_filter_quat_s16`. The crate positioning becomes "unsafe-minimal
+(4 audited sites), each traced to an ADR and argued sound for every input".

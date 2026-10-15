@@ -63,13 +63,17 @@ fn decode_filter_oct_s8(data: &mut [u8], count: usize) {
     }
 }
 
+#[allow(unsafe_code)] // ADR-0014 勘误 1: audited plain-truncation site, sound for every input
 fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
     let max = 32767f32;
 
-    for i in 0..count {
-        let xi = i16::from_le_bytes([data[i * 8], data[i * 8 + 1]]);
-        let yi = i16::from_le_bytes([data[i * 8 + 2], data[i * 8 + 3]]);
-        let zi = i16::from_le_bytes([data[i * 8 + 4], data[i * 8 + 5]]);
+    // chunked iteration keeps every access inside a fixed-size array so the
+    // elementwise loop vectorizes; stride indexing plus per-element bounds
+    // checks do not (5.6x gap to the auto-vectorized C)
+    for v in data[..count * 8].as_chunks_mut::<8>().0 {
+        let xi = i16::from_le_bytes([v[0], v[1]]);
+        let yi = i16::from_le_bytes([v[2], v[3]]);
+        let zi = i16::from_le_bytes([v[4], v[5]]);
 
         let x = f32::from(xi);
         let y = f32::from(yi);
@@ -81,32 +85,50 @@ fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
         let y = y + if y >= 0.0 { t } else { -t };
 
         let l = math::sqrt(x * x + y * y + z * z);
-        let s = max / l;
 
-        let xf = cast_i32(x * s + if x >= 0.0 { 0.5 } else { -0.5 });
-        let yf = cast_i32(y * s + if y >= 0.0 { 0.5 } else { -0.5 });
-        let zf = cast_i32(z * s + if z >= 0.0 { 0.5 } else { -0.5 });
+        // the guard removes the only NaN path (0 * inf for an exactly-zero normal; a
+        // compare-select that stays inside the vectorized loop), making the conversion
+        // finite for every input
+        let s = if l == 0.0 { 0.0 } else { max / l };
 
-        data[i * 8..i * 8 + 2].copy_from_slice(&(xf as i16).to_le_bytes());
-        data[i * 8 + 2..i * 8 + 4].copy_from_slice(&(yf as i16).to_le_bytes());
-        data[i * 8 + 4..i * 8 + 6].copy_from_slice(&(zf as i16).to_le_bytes());
+        // SAFETY: plain truncation (ADR-0014 勘误 1). For every input: l == 0 implies
+        // x = y = z = 0, so the arguments are exactly ±0.5; l > 0 implies each of
+        // |x|, |y|, |z| is bounded by l up to three rounding steps, so the arguments
+        // lie within max * (1 + 2^-22). Always finite, always representable.
+        let xf = unsafe { (x * s + if x >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
+        let yf = unsafe { (y * s + if y >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
+        let zf = unsafe { (z * s + if z >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
+
+        let (xb, yb, zb) = (
+            (xf as i16).to_le_bytes(),
+            (yf as i16).to_le_bytes(),
+            (zf as i16).to_le_bytes(),
+        );
+        v[0] = xb[0];
+        v[1] = xb[1];
+        v[2] = yb[0];
+        v[3] = yb[1];
+        v[4] = zb[0];
+        v[5] = zb[1];
     }
 }
 
+#[allow(unsafe_code)] // ADR-0014 勘误 1: audited plain-truncation site, sound for every input
 fn decode_filter_quat_s16(data: &mut [u8], count: usize) {
     let scale = 32767f32 / math::sqrt(2.0);
 
-    for i in 0..count {
-        let wi = i16::from_le_bytes([data[i * 8 + 6], data[i * 8 + 7]]);
+    // chunked iteration (see decode_filter_oct_s16)
+    for v in data[..count * 8].as_chunks_mut::<8>().0 {
+        let wi = i16::from_le_bytes([v[6], v[7]]);
 
         // recover scale from the high byte/word of the component
         let sf = i32::from(wi) | 3;
         let s = sf as f32;
 
         // convert x/y/z to floating point (unscaled! implied scale of 1/sqrt(2.f) * 1/sf)
-        let x = f32::from(i16::from_le_bytes([data[i * 8], data[i * 8 + 1]]));
-        let y = f32::from(i16::from_le_bytes([data[i * 8 + 2], data[i * 8 + 3]]));
-        let z = f32::from(i16::from_le_bytes([data[i * 8 + 4], data[i * 8 + 5]]));
+        let x = f32::from(i16::from_le_bytes([v[0], v[1]]));
+        let y = f32::from(i16::from_le_bytes([v[2], v[3]]));
+        let z = f32::from(i16::from_le_bytes([v[4], v[5]]));
 
         // reconstruct w as a square root (unscaled); we clamp to 0.f to avoid NaN due to precision errors
         let ws = s * s;
@@ -116,11 +138,14 @@ fn decode_filter_quat_s16(data: &mut [u8], count: usize) {
         // compute final scale; note that all computations above are unscaled
         let ss = scale / s;
 
-        // rounded signed float->int
-        let xf = cast_i32(x * ss + if x >= 0.0 { 0.5 } else { -0.5 });
-        let yf = cast_i32(y * ss + if y >= 0.0 { 0.5 } else { -0.5 });
-        let zf = cast_i32(z * ss + if z >= 0.0 { 0.5 } else { -0.5 });
-        let wf = cast_i32(w * ss + 0.5);
+        // SAFETY: plain truncation (ADR-0014 勘误 1). For every input: `wi | 3` is never
+        // zero (|s| >= 1), so ss is finite; |x * ss| <= 32767 * scale < 2^30 and
+        // |w * ss| <= sqrt(2) * scale up to one rounding step. Always finite, always
+        // representable, no NaN reachable.
+        let xf = unsafe { (x * ss + if x >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
+        let yf = unsafe { (y * ss + if y >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
+        let zf = unsafe { (z * ss + if z >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
+        let wf = unsafe { (w * ss + 0.5).to_int_unchecked::<i32>() };
 
         let qc = (i32::from(wi) & 3) as usize;
 
@@ -130,30 +155,40 @@ fn decode_filter_quat_s16(data: &mut [u8], count: usize) {
         let w2 = (zf as i16).to_le_bytes();
         let w3 = (wf as i16).to_le_bytes();
 
-        data[i * 8 + ((qc + 1) & 3) * 2..i * 8 + ((qc + 1) & 3) * 2 + 2].copy_from_slice(&w0);
-        data[i * 8 + ((qc + 2) & 3) * 2..i * 8 + ((qc + 2) & 3) * 2 + 2].copy_from_slice(&w1);
-        data[i * 8 + ((qc + 3) & 3) * 2..i * 8 + ((qc + 3) & 3) * 2 + 2].copy_from_slice(&w2);
-        data[i * 8 + (qc & 3) * 2..i * 8 + (qc & 3) * 2 + 2].copy_from_slice(&w3);
+        let (o0, o1, o2, o3) = (
+            ((qc + 1) & 3) * 2,
+            ((qc + 2) & 3) * 2,
+            ((qc + 3) & 3) * 2,
+            (qc & 3) * 2,
+        );
+        v[o0] = w0[0];
+        v[o0 + 1] = w0[1];
+        v[o1] = w1[0];
+        v[o1 + 1] = w1[1];
+        v[o2] = w2[0];
+        v[o2 + 1] = w2[1];
+        v[o3] = w3[0];
+        v[o3 + 1] = w3[1];
     }
 }
 
 fn decode_filter_exp_u32(data: &mut [u8], count: usize) {
-    for i in 0..count {
-        let v = u32::from_le_bytes([
-            data[i * 4],
-            data[i * 4 + 1],
-            data[i * 4 + 2],
-            data[i * 4 + 3],
-        ]);
+    // chunked iteration (see decode_filter_oct_s16)
+    for v in data[..count * 4].as_chunks_mut::<4>().0 {
+        let bits = u32::from_le_bytes([v[0], v[1], v[2], v[3]]);
 
         // decode mantissa and exponent
-        let m = ((v << 8) as i32) >> 8;
-        let e = (v as i32) >> 24;
+        let m = ((bits << 8) as i32) >> 8;
+        let e = (bits as i32) >> 24;
 
         // optimized version of ldexp(float(m), e)
         let u = f32::from_bits(((e + 127) as u32) << 23) * m as f32;
 
-        data[i * 4..i * 4 + 4].copy_from_slice(&u.to_le_bytes());
+        let ub = u.to_le_bytes();
+        v[0] = ub[0];
+        v[1] = ub[1];
+        v[2] = ub[2];
+        v[3] = ub[3];
     }
 }
 
@@ -636,6 +671,152 @@ mod tests {
             4,
             decode_filter_exp,
         );
+    }
+
+    // ADR-0014 勘误 1: the plain-truncation kernels must stay byte-identical to the
+    // cast_i32 formulation (the upstream semantics) for every input, including the
+    // exactly-zero normal, extreme magnitudes, and the degenerate quaternion scales.
+    // Random sweeps are LCG-driven and deterministic like the fixture generators.
+
+    #[test]
+    fn decode_filter_oct_s16_matches_cast_reference_on_extremes() {
+        let reference = |data: &mut [u8], count: usize| {
+            let max = 32767f32;
+
+            for i in 0..count {
+                let x = f32::from(i16::from_le_bytes([data[i * 8], data[i * 8 + 1]]));
+                let y = f32::from(i16::from_le_bytes([data[i * 8 + 2], data[i * 8 + 3]]));
+                let z = f32::from(i16::from_le_bytes([data[i * 8 + 4], data[i * 8 + 5]]))
+                    - x.abs()
+                    - y.abs();
+
+                let t = if z >= 0.0 { 0.0 } else { z };
+
+                let x = x + if x >= 0.0 { t } else { -t };
+                let y = y + if y >= 0.0 { t } else { -t };
+
+                let l = math::sqrt(x * x + y * y + z * z);
+                let s = max / l;
+
+                let xf = cast_i32(x * s + if x >= 0.0 { 0.5 } else { -0.5 });
+                let yf = cast_i32(y * s + if y >= 0.0 { 0.5 } else { -0.5 });
+                let zf = cast_i32(z * s + if z >= 0.0 { 0.5 } else { -0.5 });
+
+                data[i * 8..i * 8 + 2].copy_from_slice(&(xf as i16).to_le_bytes());
+                data[i * 8 + 2..i * 8 + 4].copy_from_slice(&(yf as i16).to_le_bytes());
+                data[i * 8 + 4..i * 8 + 6].copy_from_slice(&(zf as i16).to_le_bytes());
+            }
+        };
+
+        let mut cases: Vec<u8> = Vec::new();
+        cases.extend_from_slice(&[0; 8]); // exactly-zero normal: the former NaN path
+        for axis in 0..3usize {
+            for &mag in &[i16::MIN, i16::MAX, -1i16, 1] {
+                let mut e = [0u8; 8];
+                e[axis * 2..axis * 2 + 2].copy_from_slice(&mag.to_le_bytes());
+                cases.extend_from_slice(&e);
+            }
+        }
+        for &a in &[i16::MIN, i16::MAX] {
+            for &b in &[i16::MIN, i16::MAX] {
+                let mut e = [0u8; 8];
+                e[0..2].copy_from_slice(&a.to_le_bytes());
+                e[2..4].copy_from_slice(&b.to_le_bytes());
+                e[4..6].copy_from_slice(&a.wrapping_neg().to_le_bytes());
+                cases.extend_from_slice(&e);
+            }
+        }
+        let mut state = 0x12345678u32;
+        for _ in 0..4096 {
+            for _ in 0..8 {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                cases.push((state >> 24) as u8);
+            }
+        }
+
+        let count = cases.len() / 8;
+
+        let mut expected = cases.clone();
+        reference(&mut expected, count);
+
+        let mut actual = cases;
+        decode_filter_oct_s16(&mut actual, count);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn decode_filter_quat_s16_matches_cast_reference_on_extremes() {
+        let reference = |data: &mut [u8], count: usize| {
+            let scale = 32767f32 / math::sqrt(2.0);
+
+            for i in 0..count {
+                let wi = i16::from_le_bytes([data[i * 8 + 6], data[i * 8 + 7]]);
+
+                let sf = i32::from(wi) | 3;
+                let s = sf as f32;
+
+                let x = f32::from(i16::from_le_bytes([data[i * 8], data[i * 8 + 1]]));
+                let y = f32::from(i16::from_le_bytes([data[i * 8 + 2], data[i * 8 + 3]]));
+                let z = f32::from(i16::from_le_bytes([data[i * 8 + 4], data[i * 8 + 5]]));
+
+                let ws = s * s;
+                let ww = ws * 2.0 - x * x - y * y - z * z;
+                let w = math::sqrt(if ww >= 0.0 { ww } else { 0.0 });
+
+                let ss = scale / s;
+
+                let xf = cast_i32(x * ss + if x >= 0.0 { 0.5 } else { -0.5 });
+                let yf = cast_i32(y * ss + if y >= 0.0 { 0.5 } else { -0.5 });
+                let zf = cast_i32(z * ss + if z >= 0.0 { 0.5 } else { -0.5 });
+                let wf = cast_i32(w * ss + 0.5);
+
+                let qc = (i32::from(wi) & 3) as usize;
+
+                let w0 = (xf as i16).to_le_bytes();
+                let w1 = (yf as i16).to_le_bytes();
+                let w2 = (zf as i16).to_le_bytes();
+                let w3 = (wf as i16).to_le_bytes();
+
+                data[i * 8 + ((qc + 1) & 3) * 2..i * 8 + ((qc + 1) & 3) * 2 + 2]
+                    .copy_from_slice(&w0);
+                data[i * 8 + ((qc + 2) & 3) * 2..i * 8 + ((qc + 2) & 3) * 2 + 2]
+                    .copy_from_slice(&w1);
+                data[i * 8 + ((qc + 3) & 3) * 2..i * 8 + ((qc + 3) & 3) * 2 + 2]
+                    .copy_from_slice(&w2);
+                data[i * 8 + (qc & 3) * 2..i * 8 + (qc & 3) * 2 + 2].copy_from_slice(&w3);
+            }
+        };
+
+        let mut cases: Vec<u8> = Vec::new();
+        cases.extend_from_slice(&[0; 8]);
+        for &wi in &[i16::MIN, i16::MAX, -1i16, 1, 3, -3] {
+            for &mag in &[i16::MIN, i16::MAX, 0i16] {
+                let mut e = [0u8; 8];
+                e[0..2].copy_from_slice(&mag.to_le_bytes());
+                e[2..4].copy_from_slice(&mag.wrapping_neg().to_le_bytes());
+                e[4..6].copy_from_slice(&mag.to_le_bytes());
+                e[6..8].copy_from_slice(&wi.to_le_bytes());
+                cases.extend_from_slice(&e);
+            }
+        }
+        let mut state = 0x87654321u32;
+        for _ in 0..4096 {
+            for _ in 0..8 {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                cases.push((state >> 24) as u8);
+            }
+        }
+
+        let count = cases.len() / 8;
+
+        let mut expected = cases.clone();
+        reference(&mut expected, count);
+
+        let mut actual = cases;
+        decode_filter_quat_s16(&mut actual, count);
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
