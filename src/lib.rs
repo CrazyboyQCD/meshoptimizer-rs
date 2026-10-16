@@ -9,12 +9,14 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // ADR-0003/0012/0014: `unsafe_code` is denied crate-wide; every allowance is an
-// explicit, audited site carrying a SAFETY comment. Inventory (ADR-0014 erratum 1):
+// explicit, audited site carrying a SAFETY comment. Inventory (ADR-0014 errata 1+2):
 // - `simplifier::sloppy::compute_vertex_ids` (plain float->int truncation,
 //   soundness argued from the rescale value range)
 // - `vertexcodec::decode_simd` (SIMD decode kernel, `simd` feature only)
 // - `vertexfilter::decode_filter_oct_s16` / `decode_filter_quat_s16` (plain
 //   float->int truncation, sound for every input — see ADR-0014 erratum 1)
+// - `simplifier::prune::follow` (unchecked union-find chase, soundness argued
+//   from the parents-value invariant — see ADR-0014 erratum 2)
 #![deny(unsafe_code)]
 
 extern crate alloc;

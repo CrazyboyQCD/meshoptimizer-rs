@@ -6,14 +6,27 @@
 use super::Vector3;
 use super::adjacency::{build_position_remap, rescale_positions};
 use alloc::vec;
+use alloc::vec::Vec;
 
+// ADR-0014 erratum 2: audited unchecked-index site. SAFETY: every value ever stored
+// in `parents` is < `parents.len()` — callers initialize `components[i] = i` for
+// i < vertex_count, merge steps store only values previously read from `parents`
+// (follow returns such a value), and the entry indices come from the position-weld
+// table (remap values are vertex indices < vertex_count) or from a range-bound
+// loop counter. By induction every index used here is in bounds; the slice is
+// never reallocated and `parents` is the unique &mut borrow. The bounds check on
+// the chase loop sits on the dependent-load chain and costs ~17% of
+// meshopt_simplifyPrune (measured 2026-10-16, see bench/results baseline).
+#[allow(unsafe_code)]
 pub(crate) fn follow(parents: &mut [u32], index: u32) -> u32 {
     let mut index = index;
 
-    while index != parents[index as usize] {
-        let parent = parents[index as usize];
-        parents[index as usize] = parents[parent as usize];
-        index = parent;
+    unsafe {
+        while index != *parents.get_unchecked(index as usize) {
+            let parent = *parents.get_unchecked(index as usize);
+            *parents.get_unchecked_mut(index as usize) = *parents.get_unchecked(parent as usize);
+            index = parent;
+        }
     }
 
     index
@@ -21,15 +34,13 @@ pub(crate) fn follow(parents: &mut [u32], index: u32) -> u32 {
 
 #[allow(clippy::needless_range_loop)]
 pub(crate) fn build_components(
-    components: &mut [u32],
     vertex_count: usize,
     indices: &[u32],
-    _index_count: usize,
     remap: &[u32],
-) -> usize {
-    for (i, c) in components[..vertex_count].iter_mut().enumerate() {
-        *c = i as u32;
-    }
+) -> (Vec<u32>, usize) {
+    // collect allocates and fills in one pass — no pre-zeroing (upstream's raw
+    // malloc writes the iota table without clearing either)
+    let mut components: Vec<u32> = (0..vertex_count as u32).collect();
 
     // compute a unique (but not sequential!) index for each component via union-find
     const NEXT: [usize; 4] = [1, 2, 0, 1];
@@ -42,8 +53,8 @@ pub(crate) fn build_components(
             let r0 = remap[i0 as usize];
             let r1 = remap[i1 as usize];
 
-            let r0 = follow(components, r0);
-            let r1 = follow(components, r1);
+            let r0 = follow(&mut components, r0);
+            let r1 = follow(&mut components, r1);
 
             // merge components with larger indices into components with smaller indices
             // this guarantees that the root of the component is always the one with the smallest index
@@ -57,7 +68,7 @@ pub(crate) fn build_components(
     // make sure each element points to the component root *before* we renumber the components
     for i in 0..vertex_count {
         if remap[i] == i as u32 {
-            components[i] = follow(components, i as u32);
+            components[i] = follow(&mut components, i as u32);
         }
     }
 
@@ -82,7 +93,7 @@ pub(crate) fn build_components(
         }
     }
 
-    next_component as usize
+    (components, next_component as usize)
 }
 
 pub(crate) fn measure_components(
@@ -229,9 +240,7 @@ pub fn simplify_prune(
         None,
     );
 
-    let mut components = vec![0u32; vertex_count];
-    let component_count =
-        build_components(&mut components, vertex_count, indices, index_count, &remap);
+    let (components, component_count) = build_components(vertex_count, indices, &remap);
 
     // overallocate for temporary use inside measureComponents
     let mut component_errors = vec![0.0f32; component_count * 4];
@@ -361,9 +370,8 @@ mod tests {
         // triangle (0,1,2) welded onto position-shared (3,4,5), far from (6,7,8)
         let indices = vec![0, 1, 2, 6, 7, 8];
         let remap = vec![0u32, 1, 2, 0, 1, 2, 6, 7, 8]; // 3..5 share positions with 0..2
-        let mut components = vec![0u32; 9];
 
-        let count = build_components(&mut components, 9, &indices, indices.len(), &remap);
+        let (components, count) = build_components(9, &indices, &remap);
         assert_eq!(count, 2);
         assert_eq!(components, vec![0, 0, 0, 0, 0, 0, 1, 1, 1]);
     }
@@ -381,8 +389,7 @@ mod tests {
         ];
         let indices = vec![0, 1, 2, 3, 4, 5];
         let remap = vec![0u32, 1, 2, 3, 4, 5];
-        let mut components = vec![0u32; 6];
-        let count = build_components(&mut components, 6, &indices, indices.len(), &remap);
+        let (components, count) = build_components(6, &indices, &remap);
         assert_eq!(count, 2);
 
         let mut errors = vec![0.0f32; count * 4];

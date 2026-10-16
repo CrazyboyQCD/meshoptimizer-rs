@@ -111,3 +111,47 @@ The inventory grows to: `simplifier::sloppy::compute_vertex_ids`,
 `vertexcodec::decode_simd`, `vertexfilter::decode_filter_oct_s16`,
 `vertexfilter::decode_filter_quat_s16`. The crate positioning becomes "unsafe-minimal
 (4 audited sites), each traced to an ADR and argued sound for every input".
+
+## Erratum 2 (2026-10-16): `simplifier::prune::follow` joins the inventory
+
+`meshopt_simplifyPrune` builds connected components with a union-find whose
+`follow` performs path-halving inside a pointer-chase loop. The bounds check on
+each `parents[index]` access sits on the dependent-load chain of the chase (every
+hop's next address depends on the previous load), so unlike the noise-level
+check costs measured on remesh/simplify_sloppy/voxelize (2026-10-14/15), the
+check here is serialized with every memory reference. Measured on the bench
+corpus (interleaved 3×3, 2026-10-16): removing only the `follow` checks takes
+`prune` from 4.29 ms to 3.60 ms (−17.5%, 1.36x → 1.14x vs cpp O2, which indexes
+through raw pointers); the remaining unchecked accesses in `build_components`
+outside `follow` were worth <0.1 ms and stay bounds-checked.
+
+Decision: `follow` reads and writes `parents` through `get_unchecked` /
+`get_unchecked_mut` inside the chase loop. Soundness is argued from a structural
+invariant rather than an input precondition, so the site is sound for every
+input satisfying the caller contracts:
+
+1. Every value ever stored in `parents` is `< parents.len()`: initialization
+   writes `components[i] = i` for `i < vertex_count` (the table is allocated and
+   iota-filled inside `build_components` itself); every merge step stores a
+   value returned by `follow` (a value previously read from `parents`); no other
+   stores exist. By induction, all values are among the initially stored
+   `0..vertex_count`, and `vertex_count <= parents.len()` holds at every call
+   site (`build_components` allocates `components` with `vertex_count`).
+2. Entry indices are in range: the edge loop passes `remap[i0]`/`remap[i1]`
+   values from the position-weld table, whose entries are vertex indices
+   `< vertex_count` by construction of `build_position_remap` (and the preceding
+   `remap[i0 as usize]` load is bounds-checked against `remap`, whose length is
+   `vertex_count`); the root loop passes `i as u32` from a `0..vertex_count`
+   range. The colocated `follow_path_halves` test table satisfies the invariant.
+3. `parents` is the unique `&mut` borrow for the call's duration and is never
+   reallocated, so no aliasing or dangling hazard exists.
+
+The colocated prune tests (union-find, measure, and the `sp_prune` golden
+fixture) run clean under Miri, which flags out-of-bounds `get_unchecked` as
+undefined behavior; a deliberately corrupted table would be reported there.
+
+The inventory grows to: `simplifier::sloppy::compute_vertex_ids`,
+`vertexcodec::decode_simd`, `vertexfilter::decode_filter_oct_s16`,
+`vertexfilter::decode_filter_quat_s16`, `simplifier::prune::follow`. The crate
+positioning becomes "unsafe-minimal (5 audited sites), each traced to an ADR
+and argued sound".

@@ -256,14 +256,9 @@ pub(crate) fn simplify_edge(
     let mut component_nexterror = 0.0f32;
 
     if options & SIMPLIFY_PRUNE != 0 {
-        components = vec![0u32; vertex_count_current];
-        component_count = build_components(
-            &mut components,
-            vertex_count_current,
-            result,
-            index_count,
-            &remap,
-        );
+        let (built, count) = build_components(vertex_count_current, result, &remap);
+        components = built;
+        component_count = count;
 
         // overallocate for temporary use inside measureComponents
         component_errors = vec![0.0; component_count * 4];
