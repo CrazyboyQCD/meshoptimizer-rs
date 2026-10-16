@@ -136,9 +136,8 @@ pub(crate) fn quadric_error_attr(
     let mut r = quadric_eval(q, v);
 
     // see quadricFromAttributes for general derivation; here we need to add the parts of (eval(pos) - attr)^2 that depend on attr
-    for k in 0..attribute_count {
-        let a = va[k];
-        let gv = v.x * g[k].gx + v.y * g[k].gy + v.z * g[k].gz + g[k].gw;
+    for (a, gk) in va.iter().zip(g).take(attribute_count) {
+        let gv = v.x * gk.gx + v.y * gk.gy + v.z * gk.gz + gk.gw;
 
         r += a * (a * q.w - 2.0 * gv);
     }
@@ -574,13 +573,13 @@ pub(crate) fn fill_vertex_quadrics(
         1e-7
     };
 
-    for i in 0..vertex_count {
-        if remap[i] != i as u32 {
+    for (i, &r) in remap[..vertex_count].iter().enumerate() {
+        if r != i as u32 {
             continue;
         }
 
         // increase regularization weight for vertices marked as priority; for now we only examine the primary vertex
-        let ri = sparse_remap.map_or(i as u32, |r| r[i]) as usize;
+        let ri = sparse_remap.map_or(i as u32, |rm| rm[i]) as usize;
         let priority = vertex_lock.is_some_and(|l| l[ri] & SIMPLIFY_VERTEX_PRIORITY != 0);
 
         let p = &vertex_positions[i];
