@@ -573,7 +573,11 @@ pub(crate) fn fill_vertex_quadrics(
         1e-7
     };
 
-    for (i, &r) in remap[..vertex_count].iter().enumerate() {
+    for ((i, &r), vq) in remap[..vertex_count]
+        .iter()
+        .enumerate()
+        .zip(vertex_quadrics.iter_mut())
+    {
         if r != i as u32 {
             continue;
         }
@@ -583,12 +587,12 @@ pub(crate) fn fill_vertex_quadrics(
         let priority = vertex_lock.is_some_and(|l| l[ri] & SIMPLIFY_VERTEX_PRIORITY != 0);
 
         let p = &vertex_positions[i];
-        let w = vertex_quadrics[i].w * if priority { 1.0 } else { factor };
+        let w = vq.w * if priority { 1.0 } else { factor };
 
         let mut q = Quadric::ZERO;
         quadric_from_point(&mut q, p.x, p.y, p.z, w);
 
-        quadric_add(&mut vertex_quadrics[i], &q);
+        quadric_add(vq, &q);
     }
 }
 
