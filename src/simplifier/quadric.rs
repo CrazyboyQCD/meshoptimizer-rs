@@ -94,11 +94,11 @@ pub(crate) fn quadric_add_grad(g: &mut QuadricGrad, r: &QuadricGrad) {
 }
 
 pub(crate) fn quadric_add_grad_n(g: &mut [QuadricGrad], r: &[QuadricGrad], attribute_count: usize) {
-    for k in 0..attribute_count {
-        g[k].gx += r[k].gx;
-        g[k].gy += r[k].gy;
-        g[k].gz += r[k].gz;
-        g[k].gw += r[k].gw;
+    for (gk, rk) in g.iter_mut().zip(r).take(attribute_count) {
+        gk.gx += rk.gx;
+        gk.gy += rk.gy;
+        gk.gz += rk.gz;
+        gk.gw += rk.gw;
     }
 }
 
