@@ -71,9 +71,17 @@ fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
     // elementwise loop vectorizes; stride indexing plus per-element bounds
     // checks do not (5.6x gap to the auto-vectorized C)
     for v in data[..count * 8].as_chunks_mut::<8>().0 {
-        let xi = i16::from_le_bytes([v[0], v[1]]);
-        let yi = i16::from_le_bytes([v[2], v[3]]);
-        let zi = i16::from_le_bytes([v[4], v[5]]);
+        // word-granular loads/stores: destructured [u8;2] refs let LLVM combine the
+        // accesses into single 16-bit memory ops at the IR level, which is what the
+        // vectorizer's dependence analysis and interleave groups need (per-byte
+        // array-literal forms degrade the loop to per-byte loads + stack round-trips)
+        // the else arm is dead: v is [u8; 8], always exactly 4 word chunks
+        let [xb, yb, zb, _] = v.as_chunks_mut::<2>().0 else {
+            continue;
+        };
+        let xi = i16::from_le_bytes(*xb);
+        let yi = i16::from_le_bytes(*yb);
+        let zi = i16::from_le_bytes(*zb);
 
         let x = f32::from(xi);
         let y = f32::from(yi);
@@ -99,17 +107,9 @@ fn decode_filter_oct_s16(data: &mut [u8], count: usize) {
         let yf = unsafe { (y * s + if y >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
         let zf = unsafe { (z * s + if z >= 0.0 { 0.5 } else { -0.5 }).to_int_unchecked::<i32>() };
 
-        let (xb, yb, zb) = (
-            (xf as i16).to_le_bytes(),
-            (yf as i16).to_le_bytes(),
-            (zf as i16).to_le_bytes(),
-        );
-        v[0] = xb[0];
-        v[1] = xb[1];
-        v[2] = yb[0];
-        v[3] = yb[1];
-        v[4] = zb[0];
-        v[5] = zb[1];
+        xb.copy_from_slice(&(xf as i16).to_le_bytes());
+        yb.copy_from_slice(&(yf as i16).to_le_bytes());
+        zb.copy_from_slice(&(zf as i16).to_le_bytes());
     }
 }
 
@@ -175,7 +175,7 @@ fn decode_filter_quat_s16(data: &mut [u8], count: usize) {
 fn decode_filter_exp_u32(data: &mut [u8], count: usize) {
     // chunked iteration (see decode_filter_oct_s16)
     for v in data[..count * 4].as_chunks_mut::<4>().0 {
-        let bits = u32::from_le_bytes([v[0], v[1], v[2], v[3]]);
+        let bits = u32::from_le_bytes(*v);
 
         // decode mantissa and exponent
         let m = ((bits << 8) as i32) >> 8;
@@ -183,12 +183,7 @@ fn decode_filter_exp_u32(data: &mut [u8], count: usize) {
 
         // optimized version of ldexp(float(m), e)
         let u = f32::from_bits(((e + 127) as u32) << 23) * m as f32;
-
-        let ub = u.to_le_bytes();
-        v[0] = ub[0];
-        v[1] = ub[1];
-        v[2] = ub[2];
-        v[3] = ub[3];
+        v.copy_from_slice(&u.to_le_bytes());
     }
 }
 
