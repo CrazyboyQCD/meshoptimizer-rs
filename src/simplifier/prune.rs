@@ -27,8 +27,8 @@ pub(crate) fn build_components(
     _index_count: usize,
     remap: &[u32],
 ) -> usize {
-    for i in 0..vertex_count {
-        components[i] = i as u32;
+    for (i, c) in components[..vertex_count].iter_mut().enumerate() {
+        *c = i as u32;
     }
 
     // compute a unique (but not sequential!) index for each component via union-find
