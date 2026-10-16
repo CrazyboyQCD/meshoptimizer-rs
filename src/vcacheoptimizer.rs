@@ -268,14 +268,11 @@ fn optimize_vertex_cache_table(
             let neighbors_begin = offsets[index] as usize;
             let neighbors_size = live_triangles[index] as usize;
 
-            for i in 0..neighbors_size {
-                let tri = data[neighbors_begin + i];
+            let neighbors = &mut data[neighbors_begin..neighbors_begin + neighbors_size];
 
-                if tri == current_triangle {
-                    data[neighbors_begin + i] = data[neighbors_begin + neighbors_size - 1];
-                    live_triangles[index] -= 1;
-                    break;
-                }
+            if let Some(i) = neighbors.iter().position(|&tri| tri == current_triangle) {
+                neighbors[i] = neighbors[neighbors_size - 1];
+                live_triangles[index] -= 1;
             }
         }
 
@@ -307,8 +304,7 @@ fn optimize_vertex_cache_table(
             let neighbors_begin = offsets[index] as usize;
             let neighbors_size = live_triangles[index] as usize;
 
-            for ni in 0..neighbors_size {
-                let tri = data[neighbors_begin + ni];
+            for &tri in &data[neighbors_begin..neighbors_begin + neighbors_size] {
                 debug_assert!(emitted_flags[tri as usize] == 0);
 
                 let tri_score = triangle_scores[tri as usize] + score_diff;
