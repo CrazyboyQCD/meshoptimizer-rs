@@ -121,6 +121,10 @@ pub(crate) fn quadric_error(q: &Quadric, v: &Vector3) -> f32 {
     r.abs() * s
 }
 
+// rustc leaves this out-of-line even with #[inline] (panic paths inflate the body
+// past the inline budget); upstream's static quadricError inlines into the
+// collapse-ranking loop, so the explicit hint is parity-shaped, not an algorithm change
+#[inline(always)]
 pub(crate) fn quadric_error_attr(
     q: &Quadric,
     g: &[QuadricGrad],
