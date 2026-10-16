@@ -188,8 +188,10 @@ impl VertexHasher for CustomHasher<'_, '_> {
     }
 }
 
-fn generate_vertex_remap_impl(
-    hasher: &mut dyn VertexHasher,
+/// Upstream: `generateVertexRemap` — a template there, monomorphized here so the
+/// hash and equality probes inline instead of dispatching through `dyn`.
+fn generate_vertex_remap_impl<H: VertexHasher>(
+    hasher: &mut H,
     destination: &mut [u32],
     indices: Option<&[u32]>,
     index_count: usize,
@@ -228,8 +230,8 @@ fn generate_vertex_remap_impl(
     next_vertex as usize
 }
 
-fn generate_shadow_impl(
-    hasher: &mut dyn VertexHasher,
+fn generate_shadow_impl<H: VertexHasher>(
+    hasher: &mut H,
     destination: &mut [u32],
     indices: &[u32],
     vertex_count: usize,
