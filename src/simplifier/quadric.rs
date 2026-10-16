@@ -269,7 +269,6 @@ pub(crate) fn quadric_from_triangle_edge(
 
 // port-shape: mirrors the upstream parameter list (ADR-0005)
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn quadric_from_attributes(
     q: &mut Quadric,
     g: &mut [QuadricGrad],
@@ -347,9 +346,13 @@ pub(crate) fn quadric_from_attributes(
         w,
     };
 
-    for k in 0..attribute_count {
-        let (a0, a1, a2) = (va0[k], va1[k], va2[k]);
-
+    for (((a0, a1), a2), gk) in va0
+        .iter()
+        .zip(va1)
+        .zip(va2)
+        .zip(g.iter_mut())
+        .take(attribute_count)
+    {
         // compute gradient of eval(pos) for x/y/z/w
         // the formulas below are obtained by directly computing derivative of eval(pos) = a0 * u + a1 * v + a2 * w
         let gx = gx1 * (a1 - a0) + gx2 * (a2 - a0);
@@ -375,7 +378,7 @@ pub(crate) fn quadric_from_attributes(
         q.c += w * (gw * gw);
 
         // the only remaining sum components are ones that depend on attr; these will be added during error evaluation, see quadricError
-        g[k] = QuadricGrad {
+        *gk = QuadricGrad {
             gx: w * gx,
             gy: w * gy,
             gz: w * gz,
