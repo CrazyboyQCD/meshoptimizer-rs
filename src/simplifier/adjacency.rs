@@ -516,7 +516,7 @@ pub(crate) fn classify_vertices(
 }
 
 pub(crate) fn rescale_positions(
-    mut result: Option<&mut [Vector3]>,
+    mut result: Option<&mut Vec<Vector3>>,
     vertex_positions_data: &[f32],
     vertex_count: usize,
     vertex_positions_stride: usize,
@@ -528,16 +528,21 @@ pub(crate) fn rescale_positions(
     let mut minv = [f32::MAX; 3];
     let mut maxv = [-f32::MAX; 3];
 
+    if let Some(r) = result.as_mut() {
+        r.clear();
+        r.reserve(vertex_count);
+    }
+
     for i in 0..vertex_count {
         let ri = sparse_remap.map_or(i as u32, |r| r[i]) as usize;
         let v = &vertex_positions_data[ri * vertex_stride_float..];
 
         if let Some(r) = result.as_mut() {
-            r[i] = Vector3 {
+            r.push(Vector3 {
                 x: v[0],
                 y: v[1],
                 z: v[2],
-            };
+            });
         }
 
         for j in 0..3 {
@@ -854,14 +859,7 @@ mod tests {
     #[test]
     fn rescale_positions_extent_and_offset() {
         let positions = vec![1.0, 2.0, 3.0, -1.0, -2.0, 5.0];
-        let mut scaled = vec![
-            Vector3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0
-            };
-            2
-        ];
+        let mut scaled = Vec::new();
         let mut offset = [0.0f32; 3];
         let extent = rescale_positions(
             Some(&mut scaled),

@@ -9,6 +9,7 @@ use super::{EMPTY_SLOT, Vector3};
 use crate::math;
 use crate::quantization::cast_i32;
 use alloc::vec;
+use alloc::vec::Vec;
 
 // MurmurHash2 finalizer (CellHasher)
 fn murmur2(mut h: u32) -> u32 {
@@ -277,14 +278,7 @@ pub fn simplify_sloppy(
     // we expect to get ~2 triangles/vertex in the output
     let target_cell_count = target_index_count / 6;
 
-    let mut rescaled = vec![
-        Vector3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0
-        };
-        vertex_count
-    ];
+    let mut rescaled = Vec::new();
     rescale_positions(
         Some(&mut rescaled),
         vertex_positions,

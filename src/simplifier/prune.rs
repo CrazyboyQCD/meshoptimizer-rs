@@ -223,14 +223,7 @@ pub fn simplify_prune(
         None,
     );
 
-    let mut rescaled = vec![
-        Vector3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0
-        };
-        vertex_count
-    ];
+    let mut rescaled = Vec::new();
     rescale_positions(
         Some(&mut rescaled),
         vertex_positions,

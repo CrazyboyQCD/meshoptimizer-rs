@@ -5,7 +5,6 @@
 //! The `meshopt_SimplifyInternalDebug` visualization path is not ported: it is
 //! unreachable from any public entry point upstream ("do not use").
 
-use super::Vector3;
 use super::adjacency::{
     EdgeAdjacency, build_position_remap, build_sparse_remap, classify_vertices, finalize_vertices,
     rescale_attributes, rescale_positions,
@@ -132,14 +131,7 @@ pub(crate) fn simplify_edge(
         options,
     );
 
-    let mut vertex_positions = vec![
-        Vector3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0
-        };
-        vertex_count_current
-    ];
+    let mut vertex_positions = Vec::new();
     let mut vertex_offset = [0.0f32; 3];
     let vertex_scale = rescale_positions(
         Some(&mut vertex_positions),
