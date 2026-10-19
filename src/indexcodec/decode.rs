@@ -311,11 +311,7 @@ pub fn decode_index_buffer(
     }
 
     // we should've read all data bytes and stopped at the boundary between data and codeaux table
-    if data != data_safe_end {
-        return false;
-    }
-
-    true
+    data == data_safe_end
 }
 
 /// Upstream: `meshopt_decodeIndexSequence`.
@@ -375,11 +371,7 @@ pub fn decode_index_sequence(
     }
 
     // we should've read all data bytes and stopped at the boundary between data and tail
-    if data != data_safe_end {
-        return false;
-    }
-
-    true
+    data == data_safe_end
 }
 
 #[cfg(test)]

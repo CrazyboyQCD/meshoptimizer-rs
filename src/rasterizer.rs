@@ -275,6 +275,8 @@ fn stride_assert(vertex_positions_stride: usize) {
 }
 
 /// Upstream: `meshopt_analyzeOverdraw`.
+// port-shape: ported loops keep upstream index style
+#[allow(clippy::needless_range_loop)]
 pub fn analyze_overdraw(
     indices: &[u32],
     vertex_positions: &[f32],
@@ -324,6 +326,8 @@ pub fn analyze_overdraw(
 }
 
 /// Upstream: `meshopt_analyzeCoverage`.
+// port-shape: ported loops keep upstream index style
+#[allow(clippy::needless_range_loop)]
 pub fn analyze_coverage(
     indices: &[u32],
     vertex_positions: &[f32],

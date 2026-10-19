@@ -398,11 +398,7 @@ pub fn decode_vertex_buffer(
         vertex_offset += block_size;
     }
 
-    if data_end - pos != tail_size_pad {
-        return false;
-    }
-
-    true
+    data_end - pos == tail_size_pad
 }
 
 #[cfg(test)]
