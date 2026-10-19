@@ -28,3 +28,18 @@ uncomplicated consumption, and both are compatible with upstream MIT.
   attribution chain from the repo root.
 - If upstream's license ever changes on re-pin (ADR-0001), this ADR must be revisited before the
   next release.
+
+## Erratum 1 (2026-10-19): single MIT instead of dual licensing
+
+Supersedes the dual `MIT OR Apache-2.0` decision above (user ruling): the crate is
+distributed under the **MIT** license only. `Cargo.toml` declares `license = "MIT"`, the
+repository carries `LICENSE-MIT` (this crate) and `LICENSE-THIRD-PARTY` (upstream
+attribution), and `LICENSE-APACHE` from the original plan is not used.
+
+The attribution obligations are unchanged. Upstream meshoptimizer is MIT (Copyright
+(c) 2016-2026 Arseny Kapoulkine, verified at the pin), its license text explicitly grants
+sublicensing rights, so a downstream MIT-only license is lawful as long as the copyright
+and permission notice are retained — which `LICENSE-THIRD-PARTY` and the crate root doc
+comment provide. The Rust-ecosystem dual-licensing convention and the Apache-2.0 patent
+grant documented above are consciously given up in favor of a single maximally simple
+license.

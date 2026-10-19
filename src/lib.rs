@@ -2,6 +2,10 @@
 //! [meshoptimizer](https://github.com/zeux/meshoptimizer) library, pinned to upstream
 //! v1.3 (commit `9e1f07b1`).
 //!
+//! Upstream is Copyright (c) 2016-2026 Arseny Kapoulkine and is distributed under the
+//! MIT license; this crate inherits the attribution chain via `LICENSE-THIRD-PARTY`
+//! and is itself distributed under the MIT license (`LICENSE-MIT`).
+//!
 //! The crate builds in two configurations: with the default `std` feature (platform
 //! math) and with `--no-default-features` for `no_std` + `alloc` targets (`libm` math).
 //! See `docs/srs.md` for the requirement set, `docs/design.md` for the design,

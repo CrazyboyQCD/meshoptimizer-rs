@@ -5,3 +5,6 @@ bench/cpp/*.exe
 bench/results/
 bench/rust/target
 bench/rust/Cargo.lock
+# local working notes, never committed (both case variants; see handoff discipline)
+handoff.md
+HANDOFF.md

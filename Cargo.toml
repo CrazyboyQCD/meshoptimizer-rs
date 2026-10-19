@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
 description = "Safe, no_std-capable Rust port of meshoptimizer: mesh processing algorithms that make meshes ready for GPU consumption"
-license = "MIT OR Apache-2.0"
+license = "MIT"
+repository = "https://github.com/CrazyboyQCD/meshoptimizer-rs"
 categories = ["graphics", "encoding", "no-std"]
 keywords = ["mesh", "gltf", "graphics", "no_std", "compression"]
 
