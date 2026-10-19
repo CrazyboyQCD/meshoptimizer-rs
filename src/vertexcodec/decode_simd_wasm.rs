@@ -341,13 +341,16 @@ unsafe fn decode_deltas4_simd<const CHANNEL: u32>(
 
             r0 = unzr::<CHANNEL>(r0, rot);
             let t0 = r0;
-            pi = fixd::<CHANNEL>(pi, t0);
             let t1 = i32x4_shuffle::<1, 1, 1, 1>(r0, r0);
-            pi = fixd::<CHANNEL>(pi, t1);
             let t2 = i32x4_shuffle::<2, 2, 2, 2>(r0, r0);
-            pi = fixd::<CHANNEL>(pi, t2);
             let t3 = i32x4_shuffle::<3, 3, 3, 3>(r0, r0);
-            pi = fixd::<CHANNEL>(pi, t3);
+            // upstream FIXD assigns both: t##i = pi = op(pi, t##i); the saved
+            // dword is the post-FIXD t, i.e. the accumulated prefix
+            let t0 = fixd::<CHANNEL>(pi, t0);
+            let t1 = fixd::<CHANNEL>(t0, t1);
+            let t2 = fixd::<CHANNEL>(t1, t2);
+            let t3 = fixd::<CHANNEL>(t2, t3);
+            pi = t3;
             save_dword(&mut savep, vertex_size, t0);
             save_dword(&mut savep, vertex_size, t1);
             save_dword(&mut savep, vertex_size, t2);
@@ -355,13 +358,14 @@ unsafe fn decode_deltas4_simd<const CHANNEL: u32>(
 
             r1 = unzr::<CHANNEL>(r1, rot);
             let t0 = r1;
-            pi = fixd::<CHANNEL>(pi, t0);
             let t1 = i32x4_shuffle::<1, 1, 1, 1>(r1, r1);
-            pi = fixd::<CHANNEL>(pi, t1);
             let t2 = i32x4_shuffle::<2, 2, 2, 2>(r1, r1);
-            pi = fixd::<CHANNEL>(pi, t2);
             let t3 = i32x4_shuffle::<3, 3, 3, 3>(r1, r1);
-            pi = fixd::<CHANNEL>(pi, t3);
+            let t0 = fixd::<CHANNEL>(pi, t0);
+            let t1 = fixd::<CHANNEL>(t0, t1);
+            let t2 = fixd::<CHANNEL>(t1, t2);
+            let t3 = fixd::<CHANNEL>(t2, t3);
+            pi = t3;
             save_dword(&mut savep, vertex_size, t0);
             save_dword(&mut savep, vertex_size, t1);
             save_dword(&mut savep, vertex_size, t2);
@@ -369,13 +373,14 @@ unsafe fn decode_deltas4_simd<const CHANNEL: u32>(
 
             r2 = unzr::<CHANNEL>(r2, rot);
             let t0 = r2;
-            pi = fixd::<CHANNEL>(pi, t0);
             let t1 = i32x4_shuffle::<1, 1, 1, 1>(r2, r2);
-            pi = fixd::<CHANNEL>(pi, t1);
             let t2 = i32x4_shuffle::<2, 2, 2, 2>(r2, r2);
-            pi = fixd::<CHANNEL>(pi, t2);
             let t3 = i32x4_shuffle::<3, 3, 3, 3>(r2, r2);
-            pi = fixd::<CHANNEL>(pi, t3);
+            let t0 = fixd::<CHANNEL>(pi, t0);
+            let t1 = fixd::<CHANNEL>(t0, t1);
+            let t2 = fixd::<CHANNEL>(t1, t2);
+            let t3 = fixd::<CHANNEL>(t2, t3);
+            pi = t3;
             save_dword(&mut savep, vertex_size, t0);
             save_dword(&mut savep, vertex_size, t1);
             save_dword(&mut savep, vertex_size, t2);
@@ -383,13 +388,14 @@ unsafe fn decode_deltas4_simd<const CHANNEL: u32>(
 
             r3 = unzr::<CHANNEL>(r3, rot);
             let t0 = r3;
-            pi = fixd::<CHANNEL>(pi, t0);
             let t1 = i32x4_shuffle::<1, 1, 1, 1>(r3, r3);
-            pi = fixd::<CHANNEL>(pi, t1);
             let t2 = i32x4_shuffle::<2, 2, 2, 2>(r3, r3);
-            pi = fixd::<CHANNEL>(pi, t2);
             let t3 = i32x4_shuffle::<3, 3, 3, 3>(r3, r3);
-            pi = fixd::<CHANNEL>(pi, t3);
+            let t0 = fixd::<CHANNEL>(pi, t0);
+            let t1 = fixd::<CHANNEL>(t0, t1);
+            let t2 = fixd::<CHANNEL>(t1, t2);
+            let t3 = fixd::<CHANNEL>(t2, t3);
+            pi = t3;
             save_dword(&mut savep, vertex_size, t0);
             save_dword(&mut savep, vertex_size, t1);
             save_dword(&mut savep, vertex_size, t2);
