@@ -4,7 +4,7 @@
 //! for file-size discipline, design §4).
 
 use super::Vector3;
-use super::adjacency::{hash_buckets2, hash_lookup2, rescale_positions};
+use super::adjacency::{hash_buckets2, rescale_positions};
 use super::sloppy::{compute_vertex_ids, fill_vertex_cells};
 use crate::math;
 use crate::quantization::cast_i32;
@@ -41,24 +41,27 @@ fn fill_cell_reservoirs(
     vertex_positions: &[Vector3],
     vertex_colors: Option<&[f32]>,
     vertex_colors_stride: usize,
-    vertex_count: usize,
     vertex_cells: &[u32],
 ) {
-    let vertex_colors_stride_float = vertex_colors_stride / 4;
+    let dummy_color = [0.0f32; 3];
 
-    for i in 0..vertex_count {
-        let cell = vertex_cells[i] as usize;
-        let v = &vertex_positions[i];
+    // uniform color window: the None path reads the dummy through stride 0, so the
+    // loop body carries no colors Option discriminant test (upstream selects the
+    // dummy_color pointer per iteration; this folds the select into the stride)
+    let colors: &[f32] = match vertex_colors {
+        Some(c) => c,
+        None => &dummy_color,
+    };
+    let stride_float = if vertex_colors.is_some() {
+        vertex_colors_stride / 4
+    } else {
+        0
+    };
 
-        let color: [f32; 3] = match vertex_colors {
-            Some(c) => {
-                let base = i * vertex_colors_stride_float;
-                [c[base], c[base + 1], c[base + 2]]
-            }
-            None => [0.0; 3],
-        };
+    for (i, (v, &cell)) in vertex_positions.iter().zip(vertex_cells.iter()).enumerate() {
+        let color = &colors[i * stride_float..i * stride_float + 3];
 
-        let r = &mut cell_reservoirs[cell];
+        let r = &mut cell_reservoirs[cell as usize];
 
         r.x += v.x;
         r.y += v.y;
@@ -92,26 +95,30 @@ fn fill_cell_remap_reservoir(
     vertex_colors: Option<&[f32]>,
     vertex_colors_stride: usize,
     color_weight: f32,
-    vertex_count: usize,
 ) {
-    let vertex_colors_stride_float = vertex_colors_stride / 4;
+    let dummy_color = [0.0f32; 3];
+
+    // uniform color window: the None path reads the dummy through stride 0, so the
+    // loop body carries no colors Option discriminant test (upstream selects the
+    // dummy_color pointer per iteration; this folds the select into the stride)
+    let colors: &[f32] = match vertex_colors {
+        Some(c) => c,
+        None => &dummy_color,
+    };
+    let stride_float = if vertex_colors.is_some() {
+        vertex_colors_stride / 4
+    } else {
+        0
+    };
 
     for r in cell_remap[..cell_count].iter_mut() {
         *r = super::EMPTY_SLOT;
     }
 
-    for i in 0..vertex_count {
-        let cell = vertex_cells[i] as usize;
-        let v = &vertex_positions[i];
+    for (i, (v, &cell)) in vertex_positions.iter().zip(vertex_cells.iter()).enumerate() {
+        let cell = cell as usize;
         let r = &cell_reservoirs[cell];
-
-        let color: [f32; 3] = match vertex_colors {
-            Some(c) => {
-                let base = i * vertex_colors_stride_float;
-                [c[base], c[base + 1], c[base + 2]]
-            }
-            None => [0.0; 3],
-        };
+        let color = &colors[i * stride_float..i * stride_float + 3];
 
         let pos_error =
             (v.x - r.x) * (v.x - r.x) + (v.y - r.y) * (v.y - r.y) + (v.z - r.z) * (v.z - r.z);
@@ -253,7 +260,6 @@ pub fn simplify_points(
         &rescaled,
         vertex_colors,
         vertex_colors_stride,
-        vertex_count,
         &vertex_cells,
     );
 
@@ -279,7 +285,6 @@ pub fn simplify_points(
         vertex_colors,
         vertex_colors_stride,
         color_weight_scaled * color_weight_scaled,
-        vertex_count,
     );
 
     // copy results to the output
@@ -297,20 +302,34 @@ fn murmur2(mut h: u32) -> u32 {
     h
 }
 
-#[allow(clippy::needless_range_loop)]
 fn count_vertex_cells(table: &mut [u32], vertex_ids: &[u32], vertex_count: usize) -> usize {
     for t in table.iter_mut() {
         *t = super::EMPTY_SLOT;
     }
 
     let mut result = 0usize;
+    let hashmod = table.len() - 1;
 
-    for i in 0..vertex_count {
-        let id = vertex_ids[i];
-        let entry = hash_lookup2(table, murmur2(id), |lhs, rhs| lhs == rhs, id);
+    // termination mirrors hash_lookup2: the load factor is capped at 5/4 and
+    // quadratic probing over a power-of-two table visits every slot
+    for &id in &vertex_ids[..vertex_count] {
+        let mut bucket = murmur2(id) as usize & hashmod;
+        let mut probe = 0usize;
 
-        result += (table[entry] == super::EMPTY_SLOT) as usize;
-        table[entry] = id;
+        let empty = loop {
+            let item = table[bucket];
+
+            if item == super::EMPTY_SLOT || item == id {
+                break item == super::EMPTY_SLOT;
+            }
+
+            // hash collision, quadratic probing
+            probe += 1;
+            bucket = (bucket + probe) & hashmod;
+        };
+
+        result += empty as usize;
+        table[bucket] = id;
     }
 
     result
