@@ -191,7 +191,7 @@ pub fn simplify_points(
     let mut max_vertices = vertex_count;
 
     // instead of starting in the middle, let's guess as to what the answer might be! surface point count usually grows as a square of grid size...
-    let mut next_grid_size = cast_i32(math::sqrt(target_cell_count as f32) + 0.5);
+    let mut next_grid_size = (math::sqrt(target_cell_count as f32) + 0.5) as i32;
 
     for pass in 0..10 + K_INTERPOLATION_PASSES {
         debug_assert!(min_vertices < target_vertex_count);

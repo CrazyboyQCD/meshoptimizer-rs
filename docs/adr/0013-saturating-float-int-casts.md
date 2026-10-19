@@ -65,3 +65,32 @@ is exactly the UB territory of the upstream source.
   x86-specific observable behavior.
 - Future "why `as` here but `cast_i32` there" questions resolve to this ADR; removing
   the wrapper entirely is out of scope and not planned.
+
+## Erratum 1 (2026-10-19): dead-branch audit narrows `cast_i32` retention
+
+A full call-chain audit of the remaining `cast_i32` sites found the wrapper's checks
+**unreachable for every input** at ten sites — the UB window is already absorbed
+upstream of the cast by a total clamp (`quantize_snorm` / `quantize_unorm` clamp in
+`>=`-form, converting NaN into range), a downstream clamp plus bounds safeguard
+(`sample_texture`, `voxelize` sample count), count-derived value bounds (`bvh_pivot`
+fill cost, `min_grid`, `next_grid_size`), or an equivalence in the non-finite case
+(`decode_filter_oct` s8 and meshlet `cone_cutoff_s8`: NaN truncates to 0 exactly like
+x86 `INT_MIN` after the narrowing cast). These sites now use saturating `as` directly;
+outputs are bit-identical for every input including hostile ones (all 33 golden
+fixtures unchanged).
+
+`cast_i32` survives only where upstream's C99 §6.3.1.4 UB window is genuinely
+reachable: color u16 decode (`as_ == 0` -> division by zero, and extreme components
+with small `as_` keep an i32-overflow window the guard cannot close), `encode_filter_exp`
+mantissa
+(user NaN/inf), opacity-map level/edge resolution and subpixel UV quantization (inf or
+huge user UVs), normal-smoothing
+passes (smoothing > 2^31), and the grid-search `tip` interpolation. At those sites the
+wrapper pins the fixture-generator platform's de facto behavior (x86 `cvttss2si` ->
+`INT_MIN`): upstream has no single cross-platform behavior in this window (AArch64
+`fcvtzs` saturates with NaN -> 0, RISC-V `fcvt.w.s` maps NaN -> `INT_MAX`, wasm
+`i32.trunc_f32_s` traps), and the ADR-0007 golden rig is generated on x86, so the port
+selects x86 semantics as the canonical one for the UB window. The color u8 kernel
+instead takes an `as_ == 0` -> `ss = 0` guard — byte-identical to upstream's
+division-by-zero truncation and pinned by a colocated test — so only the u16 kernel
+carries the wrapper among the color paths.

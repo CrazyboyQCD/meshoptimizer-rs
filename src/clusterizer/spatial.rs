@@ -376,12 +376,12 @@ fn bvh_pivot(
         };
 
         // fill cost; use floating point math to round up to maxfill to avoid expensive integer modulo
-        let lrest = crate::quantization::cast_i32((lfill + maxfill - 1) as f32 * rmaxfill)
-            * maxfill as i32
-            - lfill as i32;
-        let rrest = crate::quantization::cast_i32((rfill + maxfill - 1) as f32 * rmaxfill)
-            * maxfill as i32
-            - rfill as i32;
+        // (`as` matches upstream: the quotient is bounded by fill + 1, i.e. the
+        // element count; past 2^31 upstream's own int() is in the same UB domain)
+        let lrest =
+            ((lfill + maxfill - 1) as f32 * rmaxfill) as i32 * maxfill as i32 - lfill as i32;
+        let rrest =
+            ((rfill + maxfill - 1) as f32 * rmaxfill) as i32 * maxfill as i32 - rfill as i32;
 
         cost += fill * (lrest as f32 * larea + rrest as f32 * rarea);
 

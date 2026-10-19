@@ -312,9 +312,12 @@ pub(crate) fn compute_cluster_bounds_core(
     let cone_axis_s8_e2 = (f32::from(bounds.cone_axis_s8[2]) / 127.0 - bounds.cone_axis[2]).abs();
 
     // note that we need to round this up instead of rounding to nearest, hence +1
-    let cone_cutoff_s8 = crate::quantization::cast_i32(
-        127.0 * (bounds.cone_cutoff + cone_axis_s8_e0 + cone_axis_s8_e1 + cone_axis_s8_e2) + 1.0,
-    );
+    // (`as` matches upstream for every input: the argument is bounded by
+    // ~127 * (1 + 3/127) + 1, and the NaN case (rounding pushes 1 - mindp^2
+    // below zero) truncates to 0 like upstream's truncated x86 INT_MIN)
+    let cone_cutoff_s8 = (127.0
+        * (bounds.cone_cutoff + cone_axis_s8_e0 + cone_axis_s8_e1 + cone_axis_s8_e2)
+        + 1.0) as i32;
 
     bounds.cone_cutoff_s8 = if cone_cutoff_s8 > 127 {
         127

@@ -16,7 +16,6 @@ mod polygonize;
 mod tables;
 
 use crate::math;
-use crate::quantization::cast_i32;
 use alloc::vec;
 
 /// Upstream: `meshopt_RemeshShell`. Keep only the voxel shell, skipping the
@@ -313,7 +312,10 @@ fn voxelize(
         let max_edge = math::sqrt(max_edge);
 
         // we target 2 samples per voxel edge which should be enough to hit all voxels at any rotation
-        let samples = cast_i32(max_edge * scale * 2.0).clamp(1, resolution * 2);
+        // (`as` matches upstream for every input: max_edge <= sqrt(3) * extent
+        // and scale = (res - 2) / extent bound the product well below 2^31, and
+        // non-finite positions saturate into the same clamp as upstream's INT_MIN)
+        let samples = ((max_edge * scale * 2.0) as i32).clamp(1, resolution * 2);
 
         // normal is used to compute area for weighting as well as for the quadric
         let mut nx = ey * fz - ez * fy;

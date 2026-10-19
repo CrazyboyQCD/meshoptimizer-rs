@@ -81,7 +81,9 @@ pub(crate) fn quantize_snorm(v: f32, n: i32) -> i32 {
     let v = if v >= -1.0 { v } else { -1.0 };
     let v = if v <= 1.0 { v } else { 1.0 };
 
-    cast_i32(v * scale + round)
+    // the clamp above is total (NaN fails `>= -1.0` and clamps to -1.0), so the
+    // saturating `as` is bit-identical to the cvttss2si wrapper for every input
+    (v * scale + round) as i32
 }
 
 /// Upstream: `meshopt_computePositionExponent`. `minv`/`maxv` hold at least three

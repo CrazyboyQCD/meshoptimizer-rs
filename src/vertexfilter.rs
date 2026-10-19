@@ -30,7 +30,9 @@ fn quantize_unorm(v: f32, n: i32) -> i32 {
     let v = if v >= 0.0 { v } else { 0.0 };
     let v = if v <= 1.0 { v } else { 1.0 };
 
-    cast_i32(v * scale + 0.5)
+    // the clamp above is total (NaN fails `>= 0.0` and clamps to 0.0), so the
+    // saturating `as` is bit-identical to the cvttss2si wrapper for every input
+    (v * scale + 0.5) as i32
 }
 
 fn decode_filter_oct_s8(data: &mut [u8], count: usize) {
@@ -52,10 +54,13 @@ fn decode_filter_oct_s8(data: &mut [u8], count: usize) {
         let l = math::sqrt(x * x + y * y + z * z);
         let s = max / l;
 
-        // rounded signed float->int
-        let xf = cast_i32(x * s + if x >= 0.0 { 0.5 } else { -0.5 });
-        let yf = cast_i32(y * s + if y >= 0.0 { 0.5 } else { -0.5 });
-        let zf = cast_i32(z * s + if z >= 0.0 { 0.5 } else { -0.5 });
+        // rounded signed float->int; `as` matches upstream for every input: the
+        // only non-finite case is the all-zero normal (l == 0 -> s = inf ->
+        // NaN), where `as` yields 0 exactly like upstream's truncated x86
+        // INT_MIN after the i8 narrowing below
+        let xf = (x * s + if x >= 0.0 { 0.5 } else { -0.5 }) as i32;
+        let yf = (y * s + if y >= 0.0 { 0.5 } else { -0.5 }) as i32;
+        let zf = (z * s + if z >= 0.0 { 0.5 } else { -0.5 }) as i32;
 
         data[i * 4] = xf as i8 as u8;
         data[i * 4 + 1] = yf as i8 as u8;
@@ -215,13 +220,17 @@ fn decode_filter_color_u8(data: &mut [u8], count: usize) {
         let a = ((a0 << 1) & as_) | (a0 & 1);
 
         // compute scaling factor
-        let ss = max / as_ as f32;
+        // (`as` matches upstream for every input: a zero alpha byte divides by
+        // zero upstream and truncates every component to 0 via x86 INT_MIN,
+        // which the ss == 0 guard reproduces exactly; nonzero alpha keeps
+        // |component * ss| <= 510 * 255, far below 2^31)
+        let ss = if as_ == 0 { 0.0 } else { max / as_ as f32 };
 
         // rounded float->int
-        let rf = cast_i32(r as f32 * ss + 0.5);
-        let gf = cast_i32(g as f32 * ss + 0.5);
-        let bf = cast_i32(b as f32 * ss + 0.5);
-        let af = cast_i32(a as f32 * ss + 0.5);
+        let rf = (r as f32 * ss + 0.5) as i32;
+        let gf = (g as f32 * ss + 0.5) as i32;
+        let bf = (b as f32 * ss + 0.5) as i32;
+        let af = (a as f32 * ss + 0.5) as i32;
 
         data[i * 4] = rf as u8;
         data[i * 4 + 1] = gf as u8;
@@ -812,6 +821,32 @@ mod tests {
         decode_filter_quat_s16(&mut actual, count);
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn decode_filter_color8_zero_alpha_matches_upstream_truncation() {
+        // a0 == 0 divides by zero upstream; every component truncates to 0 via
+        // x86 INT_MIN, which the ss == 0 guard reproduces byte-exactly
+        // (ADR-0013 erratum 1: the u8 kernel needs no cvttss2si emulation)
+        let mut data = [0u8; 12];
+        // largest possible positive component on the division-by-zero path
+        data[0] = 255;
+        data[1] = 127;
+        data[2] = 128; // cg = -128 as i8
+        data[3] = 0; // a0 == 0
+        // all-zero component on the NaN path (0 * inf)
+        data[7] = 0;
+        // bounded path: a0 == 1 -> ss = 255, wrapping bytes hand-computed
+        data[8] = 255;
+        data[9] = 127;
+        data[10] = 128;
+        data[11] = 1;
+
+        decode_filter_color_u8(&mut data, 3);
+
+        assert_eq!(&data[0..4], &[0, 0, 0, 0]);
+        assert_eq!(&data[4..8], &[0, 0, 0, 0]);
+        assert_eq!(&data[8..12], &[2, 129, 0, 255]);
     }
 
     #[test]

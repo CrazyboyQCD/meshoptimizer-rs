@@ -301,7 +301,8 @@ pub fn simplify_sloppy(
     } else {
         1.0
     };
-    let mut min_grid = cast_i32(1.0 / inv_error);
+    // inv_error is clamped to [1e-3, 1] above, so the quotient lies in [1, 1000]
+    let mut min_grid = (1.0 / inv_error) as i32;
     let mut max_grid = 1025i32;
     let mut min_triangles = 0usize;
     let mut max_triangles = index_count / 3;
@@ -319,7 +320,7 @@ pub fn simplify_sloppy(
     }
 
     // instead of starting in the middle, let's guess as to what the answer might be! triangle count usually grows as a square of grid size...
-    let mut next_grid_size = cast_i32(math::sqrt(target_cell_count as f32) + 0.5);
+    let mut next_grid_size = (math::sqrt(target_cell_count as f32) + 0.5) as i32;
 
     for pass in 0..10 + K_INTERPOLATION_PASSES {
         if min_triangles >= target_index_count / 3 || max_grid - min_grid <= 1 {

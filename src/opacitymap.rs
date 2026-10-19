@@ -314,8 +314,10 @@ fn sample_texture(texture: &Texture, u: f32, v: f32) -> f32 {
     };
 
     // convert from [0, 1] to 16.8 fixed point coordinates (rounded to nearest subpixel) with texel centers on integer grid
-    let uf = cast_i32(u * texture.widthf - 127.5);
-    let vf = cast_i32(v * texture.heightf - 127.5);
+    // (`as` matches upstream for every input: non-finite UVs saturate into the
+    // `.max(0)` clamp and the inbounds safeguard below, like upstream's INT_MIN)
+    let uf = (u * texture.widthf - 127.5) as i32;
+    let vf = (v * texture.heightf - 127.5) as i32;
 
     // clamp to avoid extrapolation past left/top edge since we don't wrap across the edge
     let uf = uf.max(0);
