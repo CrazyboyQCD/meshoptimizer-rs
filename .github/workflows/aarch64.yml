@@ -1,0 +1,18 @@
+# Manual aarch64 golden run (ubuntu-24.04-arm). Kept out of the push-triggered
+# CI to conserve Actions minutes; dispatch from the Actions tab when needed.
+# Currently failing: the NEON vertex-decode kernel has never been executed
+# before and mismatches the golden fixtures (see handoff for diagnosis state).
+name: aarch64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --features simd
+      - run: cargo test --no-default-features
