@@ -10,8 +10,12 @@ All notable changes to this crate are documented in this file, in the spirit of
 ### Added
 
 - Initial public release: safe, `no_std`-capable Rust port of meshoptimizer v1.3 (pin `9e1f07b1`).
-- Full upstream API: 84 public entry points, each documenting its upstream counterpart.
-- Byte-identical outputs to upstream's scalar profile, pinned by 33 zero-tolerance golden fixtures.
-- Optional `simd` feature: SSSE3+POPCNT / AVX512-VBMI2, NEON, and WASM SIMD128 vertex-decode kernels.
-- Hostile-input hardening: every-prefix truncation and bit-flip suites on all four decoders.
-- `no_std` + `alloc` capable; five Miri-audited `unsafe` sites behind the `simd` feature; MSRV 1.89.
+- Index processing: vertex remap, sparse remap/filter, welding, index analysis.
+- Optimization: vertex cache, overdraw, vertex fetch, stripification, spatial sort, partition.
+- Simplification: quadric edge collapse (with attributes), sloppy grid, point clouds, prune.
+- Clusterization: meshlet building, bounds, KD-tree clustering; meshlet codec for the output.
+- Compression: index/vertex codecs; SIMD decode (SSSE3+POPCNT/AVX512-VBMI2, NEON, WASM SIMD128).
+- Vertex filters: octahedral, quaternion, exponential, YCoCg color — encode and decode.
+- Remesher: voxelization, solidification, marching-cubes polygonization with attributes.
+- Tangent space and normals; opacity maps; quantization helpers.
+- Byte-identical outputs to upstream's scalar profile (33 golden fixtures); `no_std` + `alloc`; MSRV 1.89.
