@@ -133,10 +133,9 @@ pub fn optimize_meshlet_level(
     if level >= 1 {
         cache[..vertex_count].fill(0);
 
+        let chunks = &mut indices.as_chunks_mut::<3>().0[..triangle_count];
         for i in 0..triangle_count {
-            let mut a = indices[i * 3];
-            let mut b = indices[i * 3 + 1];
-            let mut c = indices[i * 3 + 2];
+            let [mut a, mut b, mut c] = chunks[i];
 
             // if only the middle vertex has been used, rotate triangle to ensure new vertices are always sequential
             if cache[a as usize] == 0 && cache[b as usize] != 0 && cache[c as usize] == 0 {
@@ -154,7 +153,7 @@ pub fn optimize_meshlet_level(
 
                 let mut j = i + 1;
                 while j < triangle_count && j <= i + CACHE_CUTOFF as usize {
-                    let [oa, ob, oc] = indices.as_chunks::<3>().0[j];
+                    let [oa, ob, oc] = chunks[j];
 
                     // note: edge comparisons are reversed as reused edges are flipped
                     needab |= (oa == b && ob == a) || (ob == b && oc == a) || (oc == b && oa == a);
@@ -165,28 +164,17 @@ pub fn optimize_meshlet_level(
 
                 if needab && !needbc {
                     // abc -> bca
-                    let t = a;
-                    a = b;
-                    b = c;
-                    c = t;
+                    (a, b, c) = (b, c, a);
                 } else if needab && !needca {
                     // abc -> cab
-                    let t = c;
-                    c = b;
-                    b = a;
-                    a = t;
+                    (a, b, c) = (c, a, b);
                 } else if !needab && needbc && !needca {
                     // abc -> cab: put bc at most recent FIFO position
-                    let t = c;
-                    c = b;
-                    b = a;
-                    a = t;
+                    (a, b, c) = (c, a, b);
                 }
             }
 
-            indices[i * 3] = a;
-            indices[i * 3 + 1] = b;
-            indices[i * 3 + 2] = c;
+            chunks[i] = [a, b, c];
 
             cache[a as usize] = 1;
             cache[b as usize] = 1;

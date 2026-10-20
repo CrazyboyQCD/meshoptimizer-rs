@@ -211,14 +211,14 @@ fn transform_triangles(
         K_VIEWPORT / extent
     };
 
-    for (i, &index) in indices.iter().enumerate() {
+    for (&index, t) in indices.iter().zip(triangles.as_chunks_mut::<3>().0) {
         debug_assert!(index < vertex_count as u32);
 
         let v = &vertex_positions[index as usize * vertex_stride_float..][..3];
 
-        triangles[i * 3] = (v[0] - minv[0]) * scale;
-        triangles[i * 3 + 1] = (v[1] - minv[1]) * scale;
-        triangles[i * 3 + 2] = (v[2] - minv[2]) * scale;
+        t[0] = (v[0] - minv[0]) * scale;
+        t[1] = (v[1] - minv[1]) * scale;
+        t[2] = (v[2] - minv[2]) * scale;
     }
 
     extent
