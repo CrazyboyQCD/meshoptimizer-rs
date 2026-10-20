@@ -9,13 +9,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # fmt + clippy must run on the same toolchain the repo is developed on:
-  # lint and rustfmt results are not stable across compiler versions.
+  # fmt + clippy run on the MSRV toolchain: lint results are version-sensitive,
+  # and the oldest supported compiler is the CI authority (supersedes the
+  # earlier nightly pin; local lint runs on the dev toolchain and is not gating).
   gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
