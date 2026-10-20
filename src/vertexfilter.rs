@@ -38,11 +38,11 @@ fn quantize_unorm(v: f32, n: i32) -> i32 {
 fn decode_filter_oct_s8(data: &mut [u8], count: usize) {
     let max = 127f32;
 
-    for i in 0..count {
+    for v in data[..count * 4].as_chunks_mut::<4>().0 {
         // convert x and y to floats and reconstruct z; this assumes zf encodes 1.f at the same bit count
-        let x = f32::from(data[i * 4] as i8);
-        let y = f32::from(data[i * 4 + 1] as i8);
-        let z = f32::from(data[i * 4 + 2] as i8) - x.abs() - y.abs();
+        let x = f32::from(v[0] as i8);
+        let y = f32::from(v[1] as i8);
+        let z = f32::from(v[2] as i8) - x.abs() - y.abs();
 
         // fixup octahedral coordinates for z<0
         let t = if z >= 0.0 { 0.0 } else { z };
@@ -62,9 +62,9 @@ fn decode_filter_oct_s8(data: &mut [u8], count: usize) {
         let yf = (y * s + if y >= 0.0 { 0.5 } else { -0.5 }) as i32;
         let zf = (z * s + if z >= 0.0 { 0.5 } else { -0.5 }) as i32;
 
-        data[i * 4] = xf as i8 as u8;
-        data[i * 4 + 1] = yf as i8 as u8;
-        data[i * 4 + 2] = zf as i8 as u8;
+        v[0] = xf as i8 as u8;
+        v[1] = yf as i8 as u8;
+        v[2] = zf as i8 as u8;
     }
 }
 
