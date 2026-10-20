@@ -7,6 +7,10 @@ description = "Rust-side benchmark driver for the speed/memory comparison (ADR-0
 [dependencies]
 meshoptimizer-rs = { path = "../.." }
 
+[features]
+simd = ["meshoptimizer-rs/simd"]
+simd-avx512 = ["simd", "meshoptimizer-rs/simd-avx512"]
+
 [[bin]]
 name = "bench_rs"
 path = "src/main.rs"

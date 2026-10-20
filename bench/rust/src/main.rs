@@ -1196,14 +1196,16 @@ fn run_op(op: &Op, p: &mut Prep, blob: &mut Vec<u8>) -> u64 {
 fn write_results(path: &str, mode: &str, opt: &str, results: &[Result]) {
     let cpu = std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_else(|_| "unknown".into());
     let rustc = std::env::var("RUSTC_VERSION").unwrap_or_else(|_| "unknown".into());
+    let no_simd = std::env::var("BENCH_SIMD").as_deref() != Ok("1");
     let mut s = String::new();
     let _ = writeln!(
         s,
-        "{{\"lang\":\"rust\",\"compiler\":\"{}\",\"opt\":\"{}\",\"mode\":\"{}\",\"cpu\":\"{}\",\"no_simd\":true,",
+        "{{\"lang\":\"rust\",\"compiler\":\"{}\",\"opt\":\"{}\",\"mode\":\"{}\",\"cpu\":\"{}\",\"no_simd\":{},",
         rustc.replace('"', ""),
         opt,
         mode,
-        cpu
+        cpu,
+        no_simd
     );
     let _ = writeln!(s, "\"results\":[");
     for (i, r) in results.iter().enumerate() {
@@ -1236,6 +1238,9 @@ fn main() {
     let mode = args[1].clone();
     let pins_path = args[2].clone();
     let arg3 = args[3].clone();
+    // BENCH_SIMD=1 mirrors the cpp driver's compile-time define: the build links
+    // the SIMD kernels, so out-pins generated from the scalar oracle do not apply.
+    let simd_mode = std::env::var("BENCH_SIMD").as_deref() == Ok("1");
 
     let pins = if mode != "gen" {
         load_pins(&pins_path)
@@ -1357,7 +1362,7 @@ fn main() {
                     .unwrap_or_else(|_| die(&format!("cannot read blob: {}", path.display())));
                 compare_blob(&expected, &blob, op.name);
             }
-        } else {
+        } else if !simd_mode {
             match pins.get(&format!("out|{}", op.name)) {
                 Some(&h) if h == r.out_hash => {}
                 _ => die(&format!("output pin mismatch for {}", op.name)),

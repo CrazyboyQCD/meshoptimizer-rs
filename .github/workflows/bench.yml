@@ -1,0 +1,100 @@
+# Manual rust-vs-cpp SIMD benchmark (x86_64), informational ledger tier.
+# rust stable + clang pinned to the same LLVM generation as the local ledger
+# (clang 23); rustc stable's internal LLVM trails it by design of the stable
+# channel, so the ratio table is a snapshot, not a gate. Upstream is checked
+# out at the ADR-0001 pin. Numbers from shared runners are not comparable
+# across runs; only the in-job interleaved ratio table is meaningful.
+# Trigger from the Actions tab; results land in the workflow artifacts.
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      ops:
+        description: "space-separated op subset (empty = all 23 ops)"
+        required: false
+        type: string
+        default: "vc_decode ic_decode simplify simplify_sloppy vfetch clusterize remesh vf_oct"
+      tier:
+        description: "SIMD tier (auto detects AVX512 on the runner)"
+        required: false
+        type: choice
+        default: "auto"
+        options:
+          - auto
+          - simd
+          - simd-avx512
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_PIN: 9e1f07b159d3cb777f1c67ed31fc11fd117986f4
+  CLANG_VERSION: 23
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bench/rust
+
+      - name: Install clang (apt.llvm.org, pinned major)
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh "$CLANG_VERSION"
+
+      - name: Checkout upstream at pin
+        run: |
+          git clone --quiet https://github.com/zeux/meshoptimizer /tmp/meshopt-up
+          git -C /tmp/meshopt-up checkout --quiet "$UPSTREAM_PIN"
+
+      - name: Resolve SIMD tier
+        run: |
+          if [ "${{ inputs.tier }}" != "auto" ]; then
+            echo "TIER=${{ inputs.tier }}" >> "$GITHUB_ENV"
+          elif grep -qw avx512f /proc/cpuinfo && grep -qw avx512vl /proc/cpuinfo \
+            && grep -qw avx512vbmi2 /proc/cpuinfo && grep -qw avx512bw /proc/cpuinfo; then
+            echo "TIER=simd-avx512" >> "$GITHUB_ENV"
+          else
+            echo "TIER=simd" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build cpp driver (shipped SIMD)
+        run: |
+          if [ "$TIER" = "simd-avx512" ]; then
+            CXX="clang++-$CLANG_VERSION" bench/cpp/build.sh /tmp/meshopt-up O2 simd avx512
+          else
+            CXX="clang++-$CLANG_VERSION" bench/cpp/build.sh /tmp/meshopt-up O2 simd
+          fi
+
+      - name: Build rust driver (SIMD kernels)
+        run: cargo build --release --manifest-path bench/rust/Cargo.toml --features "$TIER"
+
+      - name: Interleaved runs (3 rounds)
+        run: |
+          mkdir -p bench-out
+          for r in 1 2 3; do
+            bench/cpp/bench_cpp_O2_simd speed bench/corpus/pins.txt bench-out/cpp_$r.json ${{ inputs.ops }}
+            BENCH_SIMD=1 bench/rust/target/release/bench_rs speed bench/corpus/pins.txt bench-out/rust_$r.json ${{ inputs.ops }}
+          done
+
+      - name: Ratio table
+        run: |
+          node ci/bench_compare.mjs \
+            --cpp bench-out/cpp_1.json bench-out/cpp_2.json bench-out/cpp_3.json \
+            --rust bench-out/rust_1.json bench-out/rust_2.json bench-out/rust_3.json | tee bench-out/ratio.txt
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-out/
