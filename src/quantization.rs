@@ -65,7 +65,7 @@ pub fn dequantize_half(h: u16) -> f32 {
 // so hostile filter inputs would diverge without this wrapper. 2^31 itself
 // is not representable as i32 and casts to INT_MIN on x86 as well.
 pub(crate) fn cast_i32(v: f32) -> i32 {
-    if v.is_nan() || v >= 2147483648.0 || v < -2147483648.0 {
+    if v.is_nan() || !(-2147483648.0..2147483648.0).contains(&v) {
         i32::MIN
     } else {
         v as i32
