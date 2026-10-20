@@ -34,7 +34,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#if defined(_WIN32)
 #include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1045,7 +1049,11 @@ int main(int argc, char** argv)
 
 	if (mode == "gen")
 	{
+#if defined(_WIN32)
 		if (_mkdir(arg3) != 0 && errno != EEXIST)
+#else
+		if (mkdir(arg3, 0755) != 0 && errno != EEXIST)
+#endif
 		{
 			fprintf(stderr, "cannot create expected dir: %s\n", arg3);
 			return 1;
