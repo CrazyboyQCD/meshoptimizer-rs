@@ -7,9 +7,12 @@
 # Output: bench_cpp_<opt>[_simd] in this directory.
 # "simd" drops MESHOPTIMIZER_NO_SIMD (upstream's shipped runtime-dispatched
 # SIMD paths) and adds -DBENCH_SIMD (timing-only mode in the driver, mirroring
-# build.cmd). "avx512" additionally compiles upstream's AVX512-VBMI2 vertex
-# decode kernel (-DSIMD_AVX compile gate); upstream still runtime-checks, so
-# the binary stays safe on non-AVX512 hardware.
+# build.cmd). "avx512" additionally enables upstream's experimental AVX512
+# vertex-decode kernel: its compile gate reads compiler predefines
+# (__AVX512VBMI2__ && __AVX512VBMI__ && __AVX512VL__, vertexcodec.cpp top
+# guard), so only vertexcodec.cpp is compiled with the matching -m flags and
+# linked as an object; every other TU stays at the baseline ISA. Upstream's
+# own cpuid runtime check still guards the kernel at execution time.
 set -e
 if [ -z "$1" ]; then
     echo "usage: $0 <path-to-meshoptimizer-checkout> [O2|O3] [simd] [avx512]" >&2
@@ -18,20 +21,29 @@ fi
 CXX="${CXX:-clang++}"
 OPT="${2:-O2}"
 
+CPP="$(cd "$(dirname "$0")" && pwd)"
+UP="$(cd "$1" && pwd)"
+
 PROFILE_DEF="-DMESHOPTIMIZER_NO_SIMD"
 EXTRA_DEFS=""
 SUFFIX=""
+VC_INPUT="$UP/src/vertexcodec.cpp"
 if [ "$3" = "simd" ]; then
     PROFILE_DEF=""
     EXTRA_DEFS="-DBENCH_SIMD"
     SUFFIX="_simd"
 fi
-if [ "$4" = "avx512" ]; then
-    EXTRA_DEFS="$EXTRA_DEFS -DSIMD_AVX"
-fi
 
-CPP="$(cd "$(dirname "$0")" && pwd)"
-UP="$(cd "$1" && pwd)"
+if [ "$4" = "avx512" ]; then
+    if [ "$3" != "simd" ]; then
+        echo "avx512 requires the simd argument" >&2
+        exit 1
+    fi
+    "$CXX" "-$OPT" -DNDEBUG -DBENCH_SIMD "-DOPT_LEVEL=$OPT" -std=c++17 \
+        -mavx512vbmi2 -mavx512vbmi -mavx512vl -I "$UP/src" \
+        -c "$UP/src/vertexcodec.cpp" -o "$CPP/vertexcodec_avx.o"
+    VC_INPUT="$CPP/vertexcodec_avx.o"
+fi
 
 "$CXX" "-$OPT" -DNDEBUG $PROFILE_DEF $EXTRA_DEFS "-DOPT_LEVEL=$OPT" -std=c++17 \
     -I "$UP/src" \
@@ -47,7 +59,7 @@ UP="$(cd "$1" && pwd)"
     "$UP/src/spatialorder.cpp" \
     "$UP/src/partition.cpp" \
     "$UP/src/indexcodec.cpp" \
-    "$UP/src/vertexcodec.cpp" \
+    "$VC_INPUT" \
     "$UP/src/vertexfilter.cpp" \
     "$UP/src/meshletutils.cpp" \
     "$UP/src/meshletcodec.cpp" \
