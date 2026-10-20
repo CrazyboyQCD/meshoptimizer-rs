@@ -1,4 +1,4 @@
-# Software Requirements Specification — meshoptimizer-rs
+# Software Requirements Specification — rmeshopt
 
 - Version: 0.1 (2026-10-10)
 - Status: Draft for review

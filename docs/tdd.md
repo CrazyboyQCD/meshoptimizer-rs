@@ -1,4 +1,4 @@
-# Test-Driven Development — meshoptimizer-rs
+# Test-Driven Development — rmeshopt
 
 - Version: 0.1 (2026-10-10)
 - Status: Draft for review

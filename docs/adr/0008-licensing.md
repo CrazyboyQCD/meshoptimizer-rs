@@ -43,3 +43,10 @@ and permission notice are retained — which `LICENSE-THIRD-PARTY` and the crate
 comment provide. The Rust-ecosystem dual-licensing convention and the Apache-2.0 patent
 grant documented above are consciously given up in favor of a single maximally simple
 license.
+
+## Erratum 2 (2026-10-20): crates.io name is `rmeshopt`
+
+Resolves the working-name assumption above: `meshoptimizer-rs` on crates.io was taken by
+another project (first published 2026-10-04), so the package ships as **`rmeshopt`**
+(repository renamed accordingly; lib name `rmeshopt`). The licensing decision is unaffected.
+

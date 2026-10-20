@@ -1,4 +1,4 @@
-# meshoptimizer-rs
+# rmeshopt
 
 A Rust port of
 [meshoptimizer](https://github.com/zeux/meshoptimizer) version 1.3.
@@ -14,7 +14,7 @@ A Rust port of
 ## Usages
 
 ```rust
-use meshoptimizer_rs::simplify;
+use rmeshopt::simplify;
 
 // indices: triangle list; positions: `vertex_count` vertices, 3 floats each
 let mut destination = vec![0u32; indices.len()];
@@ -35,7 +35,7 @@ destination.truncate(written);
 ### Vertex cache optimization
 
 ```rust
-use meshoptimizer_rs::optimize_vertex_cache;
+use rmeshopt::optimize_vertex_cache;
 
 let mut optimized = vec![0u32; indices.len()];
 optimize_vertex_cache(&mut optimized, &indices, vertex_count);
@@ -44,7 +44,7 @@ optimize_vertex_cache(&mut optimized, &indices, vertex_count);
 ### Index buffer compression
 
 ```rust
-use meshoptimizer_rs::{decode_index_buffer, encode_index_buffer, encode_index_buffer_bound};
+use rmeshopt::{decode_index_buffer, encode_index_buffer, encode_index_buffer_bound};
 
 let mut buffer = vec![0u8; encode_index_buffer_bound(indices.len(), vertex_count)];
 let compressed = encode_index_buffer(&mut buffer, &indices);

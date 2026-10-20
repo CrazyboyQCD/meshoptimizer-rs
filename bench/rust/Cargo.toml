@@ -5,11 +5,11 @@ edition = "2024"
 description = "Rust-side benchmark driver for the speed/memory comparison (ADR-0011); standalone, not part of the library workspace"
 
 [dependencies]
-meshoptimizer-rs = { path = "../.." }
+rmeshopt = { path = "../.." }
 
 [features]
-simd = ["meshoptimizer-rs/simd"]
-simd-avx512 = ["simd", "meshoptimizer-rs/simd-avx512"]
+simd = ["rmeshopt/simd"]
+simd-avx512 = ["simd", "rmeshopt/simd-avx512"]
 
 [[bin]]
 name = "bench_rs"

@@ -13,7 +13,7 @@
 //! (implementing the GlobalAlloc trait requires it); the library itself remains
 //! `#![forbid(unsafe_code)]`.
 
-use meshoptimizer_rs as meshopt;
+use rmeshopt as meshopt;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;

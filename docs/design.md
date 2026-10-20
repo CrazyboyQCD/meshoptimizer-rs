@@ -1,4 +1,4 @@
-# Technical Design Document — meshoptimizer-rs
+# Technical Design Document — rmeshopt
 
 - Version: 0.2 (2026-10-10)
 - Status: Draft for review

@@ -12,7 +12,7 @@
 //! same FIXD data-flow bug that the aarch64 golden run caught in the NEON
 //! kernel shipped unnoticed in the wasm kernel too (fixed in `5866293`).
 
-use meshoptimizer_rs::{
+use rmeshopt::{
     decode_vertex_buffer, decode_vertex_version, encode_vertex_buffer_bound,
     encode_vertex_buffer_level,
 };

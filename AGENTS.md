@@ -1,4 +1,4 @@
-# AGENTS.md — meshoptimizer-rs
+# AGENTS.md — rmeshopt
 
 Safe, deterministic, `no_std` Rust port of [meshoptimizer](https://github.com/zeux/meshoptimizer)
 **v1.3** (pin: `9e1f07b1`, see `docs/adr/0001`). Phase 1: full scalar implementation.
