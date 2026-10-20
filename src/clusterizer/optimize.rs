@@ -140,10 +140,7 @@ pub fn optimize_meshlet_level(
             // if only the middle vertex has been used, rotate triangle to ensure new vertices are always sequential
             if cache[a as usize] == 0 && cache[b as usize] != 0 && cache[c as usize] == 0 {
                 // abc -> bca
-                let t = a;
-                a = b;
-                b = c;
-                c = t;
+                (a, b, c) = (b, c, a);
             } else if cache[a as usize] == 0 && cache[b as usize] == 0 && cache[c as usize] == 0 {
                 // out of three edges, the edge ab can not be reused by subsequent triangles in some encodings
                 // if subsequent triangles don't share edges ca or bc, we can rotate the triangle to fix this

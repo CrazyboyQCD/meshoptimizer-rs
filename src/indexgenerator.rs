@@ -282,16 +282,10 @@ fn filter_index_buffer_impl(destination: &mut [u32], indices: &[u32], remap: &[u
         // canonicalize triangle wrt winding preserving rotation
         if rb < ra && rb < rc {
             // abc -> bca
-            let t = ra;
-            ra = rb;
-            rb = rc;
-            rc = t;
+            (ra, rb, rc) = (rb, rc, ra);
         } else if rc < ra && rc < rb {
             // abc -> cab
-            let t = rc;
-            rc = rb;
-            rb = ra;
-            ra = t;
+            (ra, rb, rc) = (rc, ra, rb);
         }
 
         let key = TriangleKey {
@@ -851,16 +845,10 @@ pub fn generate_provoking_index_buffer(
 
         if vb != !0 && vb <= va && vb <= vc {
             // abc -> bca
-            let t = a;
-            a = b;
-            b = c;
-            c = t;
+            (a, b, c) = (b, c, a);
         } else if vc != !0 && vc <= va && vc <= vb {
             // abc -> cab
-            let t = c;
-            c = b;
-            b = a;
-            a = t;
+            (a, b, c) = (c, a, b);
         }
 
         let newidx = reorder_offset as u32;

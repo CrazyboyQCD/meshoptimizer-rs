@@ -200,18 +200,12 @@ pub fn stripify(
                 next = ea;
             } else if eb == mine {
                 // abc -> bca
-                let t = a;
-                a = b;
-                b = c;
-                c = t;
+                (a, b, c) = (b, c, a);
 
                 next = eb;
             } else if ec == mine {
                 // abc -> cab
-                let t = c;
-                c = b;
-                b = a;
-                a = t;
+                (a, b, c) = (c, a, b);
 
                 next = ec;
             }

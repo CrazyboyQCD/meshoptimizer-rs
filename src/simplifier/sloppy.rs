@@ -189,15 +189,9 @@ pub(crate) fn filter_triangles(
             let mut c = cell_remap[c2 as usize];
 
             if b < a && b < c {
-                let t = a;
-                a = b;
-                b = c;
-                c = t;
+                (a, b, c) = (b, c, a);
             } else if c < a && c < b {
-                let t = c;
-                c = b;
-                b = a;
-                a = t;
+                (a, b, c) = (c, a, b);
             }
 
             destination[result * 3] = a;
