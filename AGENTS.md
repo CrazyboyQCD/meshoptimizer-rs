@@ -36,6 +36,9 @@ design) · [docs/tdd.md](docs/tdd.md) (test-driven process) · [docs/adr/](docs/
   endianness/stride traps). Ported code should read like upstream with names Rust-ified.
 - Test code within library files obeys the same lint rules as library code (no `unwrap`).
 - Do not modify files via CLI text tools (sed/awk/shell redirects); use editor tools only.
+- CHANGELOG.md house format (mirrors the bullet_physics repo): Keep a Changelog skeleton with
+  `[Unreleased]` pinned at the top; release entries are terse per-subsystem keyword lists
+  (`Module: a, b, c.`) under `### Added`/`### Changed` — no prose descriptions, no link blocks.
 
 ## Testing
 
