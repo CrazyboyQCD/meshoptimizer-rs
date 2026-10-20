@@ -290,6 +290,9 @@ fn decode_filter_color_u16(data: &mut [u8], count: usize) {
 
 /// Upstream: `meshopt_decodeFilterOct`. `stride` is 4 (8-bit components) or
 /// 8 (16-bit components); `buffer` holds `count * stride` bytes.
+///
+/// Output matches upstream compiled without SIMD (`MESHOPTIMIZER_NO_SIMD`);
+/// upstream's SIMD filter kernels are intentionally not bit-identical to it.
 pub fn decode_filter_oct(buffer: &mut [u8], count: usize, stride: usize) {
     debug_assert!(stride == 4 || stride == 8);
 
@@ -302,6 +305,9 @@ pub fn decode_filter_oct(buffer: &mut [u8], count: usize, stride: usize) {
 
 /// Upstream: `meshopt_decodeFilterQuat`. `stride` is 8; `buffer` holds
 /// `count * stride` bytes.
+///
+/// Output matches upstream compiled without SIMD (`MESHOPTIMIZER_NO_SIMD`);
+/// upstream's SIMD filter kernels are intentionally not bit-identical to it.
 pub fn decode_filter_quat(buffer: &mut [u8], count: usize, stride: usize) {
     debug_assert!(stride == 8);
 
@@ -318,6 +324,9 @@ pub fn decode_filter_exp(buffer: &mut [u8], count: usize, stride: usize) {
 
 /// Upstream: `meshopt_decodeFilterColor`. `stride` is 4 (8-bit components)
 /// or 8 (16-bit components); `buffer` holds `count * stride` bytes.
+///
+/// Output matches upstream compiled without SIMD (`MESHOPTIMIZER_NO_SIMD`);
+/// upstream's SIMD filter kernels are intentionally not bit-identical to it.
 pub fn decode_filter_color(buffer: &mut [u8], count: usize, stride: usize) {
     debug_assert!(stride == 4 || stride == 8);
 
