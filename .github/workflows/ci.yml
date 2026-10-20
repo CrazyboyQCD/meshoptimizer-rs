@@ -43,14 +43,22 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --target wasm32-unknown-unknown --features simd
-
-  miri:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo +nightly miri --version
-      - run: cargo +nightly miri test golden_
+      # Execution-level differential: the SIMD128 decode kernel previously
+      # shipped a data-flow bug past a check-only job, so the golden, hostile,
+      # and roundtrip vertex-codec fixtures now run inside a real wasm engine.
+      - name: Build wasm differential shim
+        run: >
+          RUSTFLAGS="-C target-feature=+simd128"
+          cargo build --release --target wasm32-unknown-unknown
+          --manifest-path ci/wasm-shim/Cargo.toml
+      - name: Install wasmtime
+        run: |
+          curl -sSfL -o /tmp/wasmtime.tar.xz \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.4/wasmtime-v49.0.4-x86_64-linux.tar.xz
+          tar -xJf /tmp/wasmtime.tar.xz -C /tmp
+      - name: Run wasm differential
+        run: |
+          fails=$(/tmp/wasmtime-v49.0.4-x86_64-linux/wasmtime run --invoke run \
+            ci/wasm-shim/target/wasm32-unknown-unknown/release/wasm_diff_shim.wasm)
+          echo "differential failures: $fails"
+          test "$fails" = "0"

@@ -1,7 +1,6 @@
 # Manual aarch64 golden run (ubuntu-24.04-arm). Kept out of the push-triggered
 # CI to conserve Actions minutes; dispatch from the Actions tab when needed.
-# Currently failing: the NEON vertex-decode kernel has never been executed
-# before and mismatches the golden fixtures (see handoff for diagnosis state).
+# First fully green run: 39233741802 (2026-10-19, after the NEON FIXD fix).
 name: aarch64
 
 on:

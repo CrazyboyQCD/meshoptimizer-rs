@@ -1,0 +1,19 @@
+# Manual miri run. Kept out of the push-triggered CI because the full
+# golden_ suite takes ~2h of runner time; dispatch from the Actions tab
+# when needed (e.g. after touching an unsafe site or a codec kernel).
+name: miri
+
+on:
+  workflow_dispatch:
+
+jobs:
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly miri --version
+      - run: cargo +nightly miri test golden_

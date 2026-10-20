@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/CrazyboyQCD/meshoptimizer-rs"
 categories = ["graphics", "encoding", "no-std"]
 keywords = ["mesh", "gltf", "graphics", "no_std", "compression"]
+exclude = ["ci"]
 
 [features]
 default = ["std"]
