@@ -195,8 +195,9 @@ fn decode_filter_exp_u32(data: &mut [u8], count: usize) {
 fn decode_filter_color_u8(data: &mut [u8], count: usize) {
     let max = 255f32;
 
-    for i in 0..count {
-        let a0 = i32::from(data[i * 4 + 3]);
+    for v in data[..count * 4].as_chunks_mut::<4>().0 {
+        let [yb, cob, cgb, a0b] = v;
+        let a0 = i32::from(*a0b);
 
         // recover scale from alpha high bit
         let as_ = {
@@ -208,9 +209,9 @@ fn decode_filter_color_u8(data: &mut [u8], count: usize) {
         };
 
         // convert to RGB in fixed point (co/cg are sign extended)
-        let y = i32::from(data[i * 4]);
-        let co = i32::from(data[i * 4 + 1] as i8);
-        let cg = i32::from(data[i * 4 + 2] as i8);
+        let y = i32::from(*yb);
+        let co = i32::from(*cob as i8);
+        let cg = i32::from(*cgb as i8);
 
         let r = y + co - cg;
         let g = y + cg;
@@ -232,20 +233,24 @@ fn decode_filter_color_u8(data: &mut [u8], count: usize) {
         let bf = (b as f32 * ss + 0.5) as i32;
         let af = (a as f32 * ss + 0.5) as i32;
 
-        data[i * 4] = rf as u8;
-        data[i * 4 + 1] = gf as u8;
-        data[i * 4 + 2] = bf as u8;
-        data[i * 4 + 3] = af as u8;
+        *yb = rf as u8;
+        *cob = gf as u8;
+        *cgb = bf as u8;
+        *a0b = af as u8;
     }
 }
 
 fn decode_filter_color_u16(data: &mut [u8], count: usize) {
     let max = 65535f32;
 
-    for i in 0..count {
-        let read = |j: usize| u16::from_le_bytes([data[i * 8 + j * 2], data[i * 8 + j * 2 + 1]]);
+    for v in data[..count * 8].as_chunks_mut::<8>().0 {
+        // word-granular accesses (same shape as the oct s16 kernel); the else
+        // arm is dead: v is [u8; 8], always exactly 4 word chunks
+        let [wb, wob, wcb, wab] = v.as_chunks_mut::<2>().0 else {
+            continue;
+        };
 
-        let a0 = i32::from(read(3));
+        let a0 = i32::from(u16::from_le_bytes(*wab));
 
         // recover scale from alpha high bit
         let as_ = {
@@ -258,9 +263,9 @@ fn decode_filter_color_u16(data: &mut [u8], count: usize) {
         };
 
         // convert to RGB in fixed point (co/cg are sign extended)
-        let y = i32::from(read(0));
-        let co = i32::from(read(1) as i16);
-        let cg = i32::from(read(2) as i16);
+        let y = i32::from(u16::from_le_bytes(*wb));
+        let co = i32::from(i16::from_le_bytes(*wob));
+        let cg = i32::from(i16::from_le_bytes(*wcb));
 
         let r = y + co - cg;
         let g = y + cg;
@@ -276,9 +281,10 @@ fn decode_filter_color_u16(data: &mut [u8], count: usize) {
         let bf = cast_i32(b as f32 * ss + 0.5);
         let af = cast_i32(a as f32 * ss + 0.5);
 
-        for (j, v) in [rf, gf, bf, af].into_iter().enumerate() {
-            data[i * 8 + j * 2..i * 8 + j * 2 + 2].copy_from_slice(&(v as u16).to_le_bytes());
-        }
+        *wb = (rf as u16).to_le_bytes();
+        *wob = (gf as u16).to_le_bytes();
+        *wcb = (bf as u16).to_le_bytes();
+        *wab = (af as u16).to_le_bytes();
     }
 }
 
@@ -337,12 +343,9 @@ pub fn encode_filter_oct(
 
     let byte_bits = (stride * 2) as i32;
 
-    for i in 0..count {
+    for (i, v) in data[..count * 4].as_chunks::<4>().0.iter().enumerate() {
         // octahedral encoding of a unit vector
-        let nx = data[i * 4];
-        let ny = data[i * 4 + 1];
-        let nz = data[i * 4 + 2];
-        let nw = data[i * 4 + 3];
+        let [nx, ny, nz, nw] = *v;
 
         let nl = nx.abs() + ny.abs() + nz.abs();
         let ns = if nl == 0.0 { 0.0 } else { 1.0 / nl };
@@ -394,9 +397,12 @@ pub fn encode_filter_quat(
 
     let scaler = math::sqrt(2.0);
 
-    for i in 0..count {
-        let q = &data[i * 4..i * 4 + 4];
-
+    for (q, d) in data[..count * 4]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(destination[..count * 8].as_chunks_mut::<8>().0)
+    {
         // establish maximum quaternion component
         let mut qc = 0usize;
         if q[1].abs() > q[qc].abs() {
@@ -418,7 +424,6 @@ pub fn encode_filter_quat(
         let d2 = quantize_snorm(q[(qc + 3) & 3] * scaler * sign, bits);
         let d3 = (quantize_snorm(1.0, bits) & !3) | qc as i32;
 
-        let d = &mut destination[i * 8..i * 8 + 8];
         d[0..2].copy_from_slice(&(d0 as i16).to_le_bytes());
         d[2..4].copy_from_slice(&(d1 as i16).to_le_bytes());
         d[4..6].copy_from_slice(&(d2 as i16).to_le_bytes());
@@ -464,9 +469,7 @@ pub fn encode_filter_exp(
     }
 
     if mode == EncodeExpMode::SharedComponent {
-        for i in 0..count {
-            let v = &data[i * stride_float..i * stride_float + stride_float];
-
+        for v in data[..count * stride_float].chunks_exact(stride_float) {
             // use maximum exponent to encode values; this guarantees that mantissa is [-1, 1]
             for (j, &value) in v.iter().enumerate() {
                 let e = optlog2(value);
@@ -478,9 +481,10 @@ pub fn encode_filter_exp(
         }
     }
 
-    for i in 0..count {
-        let v = &data[i * stride_float..i * stride_float + stride_float];
-
+    for (out, v) in destination[..count * stride]
+        .chunks_exact_mut(stride)
+        .zip(data[..count * stride_float].chunks_exact(stride_float))
+    {
         let mut vector_exp = MIN_EXP;
 
         match mode {
@@ -534,8 +538,7 @@ pub fn encode_filter_exp(
             m = m.min(MMAX);
 
             let d = (m & MMASK) as u32 | ((exp as u32) << 24);
-            destination[i * stride + j * 4..i * stride + j * 4 + 4]
-                .copy_from_slice(&d.to_le_bytes());
+            out[j * 4..j * 4 + 4].copy_from_slice(&d.to_le_bytes());
         }
     }
 }
@@ -553,9 +556,7 @@ pub fn encode_filter_color(
     debug_assert!((2..=16).contains(&bits));
     debug_assert!(stride == 8 || bits <= 8);
 
-    for i in 0..count {
-        let c = &data[i * 4..i * 4 + 4];
-
+    for (i, c) in data[..count * 4].as_chunks::<4>().0.iter().enumerate() {
         let fr = quantize_unorm(c[0], bits);
         let fg = quantize_unorm(c[1], bits);
         let fb = quantize_unorm(c[2], bits);

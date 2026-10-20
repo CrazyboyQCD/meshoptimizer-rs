@@ -28,9 +28,9 @@ fn calculate_sort_data(
 
     let mut mesh_centroid = [0f32; 3];
 
-    for i in 0..vertex_count {
-        let p = &vertex_positions[vertex_stride_float * i..][..3];
-
+    for p in
+        vertex_positions[..vertex_count * vertex_stride_float].chunks_exact(vertex_stride_float)
+    {
         mesh_centroid[0] += p[0];
         mesh_centroid[1] += p[1];
         mesh_centroid[2] += p[2];

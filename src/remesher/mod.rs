@@ -235,8 +235,10 @@ fn measure_grid(
     let mut minv = [f32::MAX; 3];
     let mut maxv = [-f32::MAX; 3];
 
-    for i in 0..vertex_count {
-        let v = &vertex_positions[i * vertex_stride_float..];
+    for p in
+        vertex_positions[..vertex_count * vertex_stride_float].chunks_exact(vertex_stride_float)
+    {
+        let v = &p[..3];
 
         for j in 0..3 {
             let vj = v[j];

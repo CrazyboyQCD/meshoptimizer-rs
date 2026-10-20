@@ -28,8 +28,10 @@ fn compute_order(
     let mut minv = [f32::MAX; 3];
     let mut maxv = [-f32::MAX; 3];
 
-    for i in 0..vertex_count {
-        let v = &vertex_positions[i * vertex_stride_float..][..3];
+    let vertex_count_positions = &vertex_positions[..vertex_count * vertex_stride_float];
+
+    for p in vertex_count_positions.chunks_exact(vertex_stride_float) {
+        let v = &p[..3];
 
         for j in 0..3 {
             let vj = v[j];
@@ -54,8 +56,11 @@ fn compute_order(
     let scale = if extent == 0.0 { 0.0 } else { 65535.0 / extent };
 
     // generate Morton order based on the position inside a unit cube
-    for i in 0..vertex_count {
-        let v = &vertex_positions[i * vertex_stride_float..][..3];
+    for (i, p) in vertex_count_positions
+        .chunks_exact(vertex_stride_float)
+        .enumerate()
+    {
+        let v = &p[..3];
 
         let x = (v[0] - minv[0]) * scale + 0.5;
         let y = (v[1] - minv[1]) * scale + 0.5;
