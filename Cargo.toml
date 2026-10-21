@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/CrazyboyQCD/rmeshopt"
 categories = ["graphics", "encoding", "no-std"]
 keywords = ["mesh", "meshoptimizer", "gltf", "no_std", "compression"]
-exclude = ["ci"]
+exclude = ["ci", "bench"]
 
 [features]
 default = ["std"]
