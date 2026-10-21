@@ -45,6 +45,9 @@ design) · [docs/tdd.md](docs/tdd.md) (test-driven process) · [docs/adr/](docs/
 - Golden fixtures are **generated from upstream v1.3**, never hand-typed; long vectors are
   committed as generated segment literals or `include_bytes!` files with `const _LEN_CHECK`
   length pins — [ADR-0007](docs/adr/0007-golden-vectors.md).
+- Fixtures are **repository-only**: the published package excludes `tests/`, so `cargo test`
+  from a crates.io tarball is not supported (verification lives in the repo/CI). Regular
+  `cargo build`/`cargo check` of the published crate is unaffected.
 - If a decoder fails a fixture: re-verify the fixture against upstream first; only then suspect
   the decoder.
 - Strictness: encoders byte-exact; integer outputs exact; float outputs exact except

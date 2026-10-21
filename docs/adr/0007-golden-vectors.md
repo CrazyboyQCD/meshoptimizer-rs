@@ -41,3 +41,14 @@ errors then masquerade as decoder bugs and burn debugging time on the wrong side
   colocated test modules where binary files are impractical.
 - Regenerating fixtures requires a C++ toolchain once, at re-pin time — not per-test-run.
 - The corpus is version-controlled, so differential results are reproducible across machines.
+
+## Erratum 1 (2026-10-21): fixtures are repository-only; the published package excludes `tests/`
+
+The crate is published with `tests/` in the Cargo `exclude` list, so the fixture corpus and the
+C++ fixture generator stay in the repository and are not part of the crates.io tarball.
+Byte-exact verification remains fully reproducible from a repository checkout and in CI. The
+published crate builds normally (`cargo build`/`cargo check` never compile test code), but
+running `cargo test` from the extracted tarball is not supported — the colocated
+`include_bytes!` fixtures only resolve inside the repository. This trades tarball
+self-verification for a package an order of magnitude smaller (0.9 MiB unpacked / 0.2 MiB
+download vs 4.3 MiB / 1.0 MiB with the corpus shipped).

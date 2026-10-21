@@ -1,6 +1,6 @@
 [package]
 name = "rmeshopt"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.89"
 description = "Safe, no_std-capable Rust port of meshoptimizer: mesh processing algorithms that make meshes ready for GPU consumption"
@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/CrazyboyQCD/rmeshopt"
 categories = ["graphics", "encoding", "no-std"]
 keywords = ["mesh", "meshoptimizer", "gltf", "no_std", "compression"]
-exclude = ["ci", "bench"]
+exclude = ["ci", "bench", "tests"]
 
 [features]
 default = ["std"]
