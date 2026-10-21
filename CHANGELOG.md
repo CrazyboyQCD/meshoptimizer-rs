@@ -5,6 +5,12 @@ All notable changes to this crate are documented in this file, in the spirit of
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
+### Changed
+
+- Packaging: exclude the bench harness from the published package.
+
 ## [0.1.0] - 2026-10-20
 
 ### Added
