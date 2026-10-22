@@ -8,19 +8,19 @@ use super::adjacency::{build_position_remap, rescale_positions};
 use alloc::vec;
 use alloc::vec::Vec;
 
-// ADR-0014 erratum 2: audited unchecked-index site. SAFETY: every value ever stored
-// in `parents` is < `parents.len()` — callers initialize `components[i] = i` for
-// i < vertex_count, merge steps store only values previously read from `parents`
-// (follow returns such a value), and the entry indices come from the position-weld
-// table (remap values are vertex indices < vertex_count) or from a range-bound
-// loop counter. By induction every index used here is in bounds; the slice is
-// never reallocated and `parents` is the unique &mut borrow. The bounds check on
-// the chase loop sits on the dependent-load chain and costs ~17% of
-// meshopt_simplifyPrune (measured 2026-10-16, see bench/results baseline).
 #[allow(unsafe_code)]
 pub(crate) fn follow(parents: &mut [u32], index: u32) -> u32 {
     let mut index = index;
 
+    // ADR-0014 erratum 2: audited unchecked-index site. SAFETY: every value ever stored
+    // in `parents` is < `parents.len()` — callers initialize `components[i] = i` for
+    // i < vertex_count, merge steps store only values previously read from `parents`
+    // (follow returns such a value), and the entry indices come from the position-weld
+    // table (remap values are vertex indices < vertex_count) or from a range-bound
+    // loop counter. By induction every index used here is in bounds; the slice is
+    // never reallocated and `parents` is the unique &mut borrow. The bounds check on
+    // the chase loop sits on the dependent-load chain and costs ~17% of
+    // meshopt_simplifyPrune (measured 2026-10-16, see bench/results baseline).
     unsafe {
         while index != *parents.get_unchecked(index as usize) {
             let parent = *parents.get_unchecked(index as usize);
