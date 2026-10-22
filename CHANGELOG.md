@@ -5,6 +5,12 @@ All notable changes to this crate are documented in this file, in the spirit of
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-22
+
+### Changed
+
+- Prune: SAFETY comment placement.
+
 ## [0.1.2] - 2026-10-21
 
 ### Changed
